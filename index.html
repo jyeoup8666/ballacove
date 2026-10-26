@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Ballacove 프로토타입</title>
-<meta name="claude:viewport-fit-sides" content="cover">
+<title>Ballacove</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gothic+A1:wght@500;700;800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.js"></script>
 <style>
 /* 레이아웃: 왼쪽 내비 + 작업 영역. Cove Map은 점 격자 캔버스 위에 카드와 연결선. 강조색은 만(cove)의 깊은 청록 하나, 카드 종류색은 의미 표시용. */
 :root{
@@ -300,23 +300,40 @@ input[type=file]{font-size:13px;max-width:100%}
   .prow-main .mini{width:72px}
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* 로그인·공개 화면 */
+#app.guest{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr)}
+#app.guest .side,#app.guest .tabbar{display:none}
+.authwrap{min-height:100%;display:grid;place-items:center;padding-block:32px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.authcard{width:min(400px,100%);background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:24px;display:grid;gap:16px;box-shadow:var(--shadow)}
+.authcard .brand{padding:0}
+.formerr{color:var(--bad);font-size:13px;margin:0}
+.formok{color:var(--ok);font-size:13px;margin:0}
+.guestbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-block:10px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));border-bottom:1px solid var(--line);background:var(--surface);position:sticky;top:0;z-index:4}
+.guestbar .brand{padding:0;font-size:17px}.guestbar .brand svg{width:22px;height:22px}
+.loading{display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);gap:10px}
+.account{display:grid;gap:4px;margin-top:6px;overflow-wrap:anywhere}
 </style>
 </head>
 <body>
-<div id="app">
+<div id="app" class="guest">
   <aside class="side">
     <div class="brand"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 18a12 12 0 0 1 24 0" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linecap="round"/><path d="M4 23c3-2.4 5.3-2.4 8 0s5.3 2.4 8 0 5.3-2.4 8 0" fill="none" stroke="var(--k-ref)" stroke-width="2.4" stroke-linecap="round"/></svg>Ballacove</div>
     <nav class="navlist" id="nav"></nav>
     <div class="plan" id="plan"></div>
   </aside>
-  <main id="main"></main>
+  <main id="main"><div class="loading"><span class="spin"></span><span>불러오는 중</span></div></main>
   <nav class="tabbar" id="tabbar"></nav>
 </div>
 <div id="modal" hidden></div>
 <div id="toast" role="status" aria-live="polite"></div>
-
 <script>
-const KEY='ballacove-proto-v2';
+/* ---------- Supabase ---------- */
+const SUPABASE_URL='https://stbnlohykesgkoniiifc.supabase.co';
+const SUPABASE_KEY='sb_publishable_2g5UHihRAnmg7z5ORUT28g_5F3fd8yh';
+const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+const BASE=location.origin+location.pathname;
+
 const DAY=864e5;
 const $=s=>document.querySelector(s);
 const now=()=>Date.now();
@@ -329,123 +346,129 @@ const clock=t=>{const d=new Date(t);return `${pad(d.getHours())}:${pad(d.getMinu
 const fmtDT=t=>`${fmtDate(t)} ${clock(t)}`;
 const isoDate=t=>{const d=new Date(t);return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`};
 const sod=t=>{const d=new Date(t);d.setHours(0,0,0,0);return d.getTime()};
+const ts=v=>v?new Date(v).getTime():null;
+const iso=v=>v?new Date(v).toISOString():null;
 function rel(t){const s=(now()-t)/1000;if(s<60)return '방금';if(s<3600)return `${Math.floor(s/60)}분 전`;if(s<86400)return `${Math.floor(s/3600)}시간 전`;if(s<86400*30)return `${Math.floor(s/86400)}일 전`;return fmtDate(t)}
 function dDay(t){const d=Math.round((sod(t)-sod(now()))/DAY);return d>0?`D-${d}`:d===0?'오늘 마감':`${-d}일 지남`}
 const tc=s=>`${pad(Math.floor(s/60))}:${pad(Math.floor(s%60))}`;
-const num=n=>n.toLocaleString('ko-KR');
 
 const KIND={idea:'아이디어·기획',intro:'도입부',ref:'참고자료',scene:'장면',feedback:'피드백·일정',memo:'메모'};
 const MEDIA={image:'이미지',video:'영상',youtube:'YouTube',link:'웹 링크',pdf:'PDF',doc:'문서',psd:'PSD',tool:'외부 도구'};
 const TYPES=['숏폼','YouTube','브랜드 영상','자유 작업'];
-const mname=m=>m.me?db.profile.name:m.name;
-const byline=()=>[esc(db.profile.name),db.profile.handle?'@'+esc(db.profile.handle):''].filter(Boolean).join(' · ');
+const PERM={owner:'소유자',editor:'편집',viewer:'보기'};
 const kindLabel=c=>c.kind==='ref'&&c.media?`${MEDIA[c.media]}`:KIND[c.kind];
-
-/* ---------- 예시 이미지(영상 장면) 생성 ---------- */
-function genFrame(h,i,label){
-  const c=document.createElement('canvas');c.width=192;c.height=108;const x=c.getContext('2d');
-  const g=x.createLinearGradient(0,0,0,108);g.addColorStop(0,`hsl(${h},35%,${12+i*3}%)`);g.addColorStop(1,`hsl(${h+30},45%,${24+i*4}%)`);
-  x.fillStyle=g;x.fillRect(0,0,192,108);
-  for(let k=0;k<5;k++){const cx=20+((k*41+i*23)%170),cy=20+((k*17+i*11)%50);const rg=x.createRadialGradient(cx,cy,0,cx,cy,18+k*2);rg.addColorStop(0,`hsla(${40+k*12},90%,70%,.85)`);rg.addColorStop(1,'hsla(40,90%,60%,0)');x.fillStyle=rg;x.fillRect(0,0,192,108)}
-  x.fillStyle='rgba(0,0,0,.35)';x.fillRect(0,78,192,30);x.fillStyle=`hsl(${h},20%,8%)`;x.fillRect(60+i*6,50,14,40);x.fillRect(120-i*5,58,10,32);
-  x.fillStyle='rgba(255,255,255,.85)';x.font='10px monospace';x.fillText(label,6,100);
-  try{return c.toDataURL('image/jpeg',.75)}catch(e){return ''}
-}
-function genFrames(h,dur){return [.1,.3,.5,.7,.9].map((p,i)=>({t:dur*p,img:genFrame(h,i,tc(dur*p))}))}
-
-/* ---------- 예시 데이터 ---------- */
-function seed(){
-  const t=now();
-  const p1={id:'p1',title:'도쿄 골목 브이로그 3편',type:'YouTube',status:'active',role:'owner',visibility:'private',created:t-9*DAY,updated:t-2*36e5,due:t+DAY,
-    goal:'관광지가 아닌 동네 골목 세 곳을 밤 분위기로 담기',
-    members:[{name:'',me:true,role:'기획·촬영',perm:'소유자'},{name:'',role:'편집',perm:'편집'}],
-    cards:[
-      {id:'c1',kind:'idea',x:40,y:40,title:'기획 의도',body:'관광지 말고 동네 사람만 아는 골목 3곳. 밤 9시 이후 분위기 위주로, 내레이션은 짧게.',created:t-9*DAY,public:true},
-      {id:'c2',kind:'intro',x:320,y:40,title:'도입부 15초',body:'자판기 불빛 클로즈업 → 내레이션 "여기서부터는 지도에 없어요"',created:t-8*DAY,public:true},
-      {id:'c3',kind:'ref',media:'youtube',x:40,y:250,title:'참고: 야간 골목 산책 영상 톤',url:'https://www.youtube.com/results?search_query=tokyo+night+walk',host:'YouTube',body:'카메라 높이와 걷는 속도 참고',created:t-8*DAY,public:false},
-      {id:'c4',kind:'ref',media:'link',x:320,y:250,title:'나카노 골목 위치 메모',url:'https://www.google.com/maps/search/nakano+yokocho',host:'google.com',body:'역 북쪽 출구 기준 도보 5분',created:t-7*DAY,public:false},
-      {id:'c9',kind:'ref',media:'video',x:40,y:430,title:'촬영 테스트 컷 (예시)',fileName:'test_cut_0912.mp4',procState:'done',frames:genFrames(205,94),duration:94,orient:'h',body:'ISO 3200에서 노이즈 확인용',created:t-5*DAY,public:true},
-      {id:'c5',kind:'scene',x:620,y:40,title:'장면 1 · 자판기 골목',body:'핸드헬드, 24fps. 자판기 불빛을 첫 컷으로.',created:t-6*DAY,public:true},
-      {id:'c6',kind:'scene',x:620,y:220,title:'장면 2 · 이자카야 앞',body:'간판 불 켜지는 순간 기다렸다가 촬영',created:t-6*DAY,public:true},
-      {id:'c7',kind:'scene',x:620,y:390,title:'장면 3 · 마지막 전철',body:'플랫폼 안내 방송 소리로 마무리',created:t-5*DAY,public:true},
-      {id:'c8',kind:'feedback',x:900,y:220,title:'장면 2 길이 줄이기',body:'40초 → 25초. 간판 켜지기 전 대기 구간 덜어내기',who:'',due:t+DAY,created:t-1*DAY,public:false}
-    ],
-    links:[['c1','c2'],['c2','c5'],['c3','c5'],['c4','c6'],['c8','c6'],['c9','c7']],shelf:[],versions:[]};
-  p1.versions.push({id:'v1',name:'1차 구성안',at:t-3*DAY,snap:JSON.stringify({cards:p1.cards.slice(0,6),links:[['c1','c2'],['c2','c5'],['c3','c5']],shelf:[]})});
-  const p2={id:'p2',title:'러닝화 봄 캠페인 숏폼',type:'숏폼',status:'active',role:'editor',owner:'',visibility:'private',created:t-4*DAY,updated:t-26*36e5,due:t+6*DAY,
-    members:[{name:'',role:'기획',perm:'소유자'},{name:'',me:true,role:'촬영',perm:'편집'}],
-    cards:[
-      {id:'d1',kind:'idea',x:40,y:40,title:'15초 안에 쿠셔닝 보여주기',body:'발 착지 슬로모션 0.5배속 한 컷',created:t-4*DAY,public:true},
-      {id:'d2',kind:'scene',x:320,y:40,title:'장면 1 · 새벽 한강',body:'역광, 러너 실루엣',created:t-3*DAY,public:true},
-      {id:'d3',kind:'scene',x:320,y:210,title:'장면 2 · 착지 클로즈업',body:'',created:t-3*DAY,public:true},
-      {id:'d4',kind:'feedback',x:600,y:110,title:'브랜드 가이드 확인',body:'로고는 첫 2초 안에 넣지 말 것',who:'',due:t+3*DAY,created:t-2*DAY,public:false}
-    ],links:[['d1','d2'],['d1','d3'],['d4','d2']],shelf:[],versions:[]};
-  const p3={id:'p3',title:'카페 창업 다큐 1편',type:'YouTube',status:'done',role:'owner',visibility:'public',inHome:true,created:t-80*DAY,updated:t-12*DAY,completed:t-12*DAY,
-    members:[{name:'',me:true,role:'연출·촬영·편집',perm:'소유자'},{name:'',role:'자막',perm:'편집'}],
-    result:{url:'https://www.youtube.com/',goal:'오픈 30일 전부터 첫 손님이 오기까지, 1인 카페 사장의 한 달을 기록',period:'2026.08.01 – 2026.09.10',tools:'Premiere Pro, Lightroom, Notion'},
-    cards:[
-      {id:'e1',kind:'idea',x:40,y:40,title:'기획 의도',body:'창업 성공담이 아니라 준비하는 사람의 불안과 루틴을 담는다.',created:t-80*DAY,public:true},
-      {id:'e2',kind:'ref',media:'video',x:320,y:40,title:'오픈 전날 밤 촬영본',fileName:'night_before.mov',procState:'done',frames:genFrames(28,312),duration:312,orient:'h',body:'',created:t-40*DAY,public:true},
-      {id:'e3',kind:'scene',x:600,y:40,title:'장면 · 첫 손님',body:'주문 받는 손만 보이게. 얼굴은 동의 받은 경우만.',created:t-30*DAY,public:true},
-      {id:'e4',kind:'feedback',x:600,y:210,title:'음악 저작권 확인',body:'무료 음원으로 교체 완료',who:'',created:t-20*DAY,public:false}
-    ],links:[['e1','e2'],['e2','e3']],shelf:[],versions:[],
-    publicCards:['e1','e2','e3'],metrics:{status:'ok',views:12840,likes:612,comments:87,checked:t-3*36e5}};
-  const p5={id:'p5',title:'제주 한달살이 숏폼 시리즈',type:'숏폼',status:'done',role:'owner',visibility:'private',inHome:false,created:t-60*DAY,updated:t-30*DAY,completed:t-30*DAY,
-    members:[{name:'',me:true,role:'기획·촬영·편집',perm:'소유자'}],result:{url:'https://www.youtube.com/',goal:'하루 1분, 30편',period:'2026.07',tools:'CapCut'},
-    cards:[{id:'f1',kind:'idea',x:40,y:40,title:'하루 1분 규칙',body:'',created:t-60*DAY,public:true}],links:[],shelf:[],versions:[],publicCards:['f1'],metrics:{status:'expired'}};
-  const p6={id:'p6',title:'망원 베이커리 브랜드 필름',type:'브랜드 영상',status:'done',role:'editor',owner:'',visibility:'public',inHome:true,created:t-50*DAY,updated:t-20*DAY,completed:t-20*DAY,
-    members:[{name:'',role:'연출',perm:'소유자'},{name:'',me:true,role:'촬영',perm:'편집'}],result:{url:'',goal:'새벽 4시 반죽부터 첫 판매까지',period:'2026.08',tools:'Sony FX3, DaVinci Resolve'},
-    cards:[{id:'g1',kind:'ref',media:'video',x:40,y:40,title:'반죽 장면 촬영본',fileName:'dough.mp4',procState:'done',frames:genFrames(35,180),duration:180,orient:'h',created:t-45*DAY,public:true}],links:[],shelf:[],versions:[],publicCards:['g1']};
-  const p4={id:'p4',title:'겨울 캠핑 숏폼 테스트',type:'숏폼',status:'archived',role:'owner',visibility:'private',created:t-120*DAY,updated:t-100*DAY,
-    members:[{name:'',me:true,role:'전체',perm:'소유자'}],cards:[{id:'h1',kind:'idea',x:40,y:40,title:'장작 소리 ASMR',body:'',created:t-120*DAY,public:true}],links:[],shelf:[],versions:[]};
-  return {
-    profile:{name:'',handle:'',intro:'동네와 사람을 오래 보고 기록하는 영상 창작자',fields:['브이로그','다큐','숏폼']},
-    projects:[p1,p2,p3,p5,p6,p4],
-    trash:[{id:'p7',title:'첫 번째 브이로그 (초안)',type:'YouTube',status:'active',role:'owner',deletedAt:t-26*DAY,cards:[],links:[],shelf:[],versions:[],members:[],created:t-90*DAY,updated:t-26*DAY}],
-    notifications:[
-      {id:'n1',kind:'action',text:'‘장면 2 길이 줄이기’ 피드백에서 회원님이 언급됐어요',pid:'p1',cid:'c8',at:t-50*6e4,read:false},
-      {id:'n2',kind:'action',text:'‘도쿄 골목 브이로그 3편’ 마감이 내일이에요',pid:'p1',at:t-3*36e5,read:false},
-      {id:'n3',kind:'alert',text:'YouTube 연결이 만료됐어요. ‘제주 한달살이 숏폼 시리즈’ 성과를 계속 보려면 다시 연결하세요.',pid:'p5',at:t-20*36e5,read:false},
-      {id:'n4',kind:'general',text:'참여자가 ‘러닝화 봄 캠페인 숏폼’에 장면 카드 2장을 추가했어요',pid:'p2',at:t-26*36e5,read:true},
-      {id:'n5',kind:'general',text:'‘카페 창업 다큐 1편’ 공개 페이지가 Creator Home에 연결됐어요',pid:'p3',at:t-12*DAY,read:true}
-    ],
-    activity:[
-      {at:t-2*36e5,text:'‘장면 3 · 마지막 전철’에 테스트 컷을 연결했어요',pid:'p1'},
-      {at:t-26*36e5,text:'참여자가 장면 카드 2장을 추가했어요',pid:'p2'},
-      {at:t-3*DAY,text:'‘1차 구성안’ 저장 지점을 만들었어요',pid:'p1'},
-      {at:t-12*DAY,text:'‘카페 창업 다큐 1편’을 완성하고 공개했어요',pid:'p3'}
-    ]
-  };
-}
-
-let db;
-try{const s=localStorage.getItem(KEY);db=s?JSON.parse(s):null}catch(e){db=null}
-if(!db||!db.projects){db=seed()}
-
-/* ---------- 저장 ---------- */
-let saveState='saved',saveTimer=null,lastSaved=now();
-function persist(){try{localStorage.setItem(KEY,JSON.stringify(db));saveState='saved';lastSaved=now()}catch(e){saveState='failed';toast('저장하지 못했어요. 브라우저 저장 공간이 부족할 수 있어요.')}paintSave();paintChrome()}
-function changed(){saveState='saving';paintSave();clearTimeout(saveTimer);saveTimer=setTimeout(persist,700);const p=cur();if(p)p.updated=now()}
-function quiet(){clearTimeout(saveTimer);saveTimer=setTimeout(persist,400)}
-function paintSave(){const el=$('#savestate');if(!el)return;el.className='savestate '+saveState;
-  el.innerHTML=saveState==='saving'?'<i></i>저장 중…':saveState==='failed'?'<i></i><button class="linkbtn" data-act="save-retry">저장 실패 · 다시 시도</button>':`<i></i>저장됨 ${clock(lastSaved)}`}
+const LOGO='<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 18a12 12 0 0 1 24 0" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linecap="round"/><path d="M4 23c3-2.4 5.3-2.4 8 0s5.3 2.4 8 0 5.3-2.4 8 0" fill="none" stroke="var(--k-ref)" stroke-width="2.4" stroke-linecap="round"/></svg>';
 
 /* ---------- 상태 ---------- */
-const ui={view:'home',pid:null,tab:'active',sel:null,linkFrom:null};
+let me=null,started=false,publicMode=false;
+const emptyDb=()=>({profile:{name:'',handle:'',intro:'',fields:[]},projects:[],trash:[],notifications:[],activity:[]});
+let db=emptyDb();
+const ui={view:'loading',pid:null,tab:'active',sel:null,linkFrom:null,pub:null,authMode:'login',err:''};
 const hist={};
 const cur=()=>db.projects.find(p=>p.id===ui.pid);
 const proj=id=>db.projects.find(p=>p.id===id);
-function logAct(text,pid){db.activity.unshift({at:now(),text,pid});db.activity=db.activity.slice(0,30)}
-function notify(kind,text,pid,cid){db.notifications.unshift({id:uid(),kind,text,pid,cid,at:now(),read:false})}
+const anyProj=id=>db.projects.find(p=>p.id===id)||db.trash.find(p=>p.id===id);
 const ownActive=()=>db.projects.filter(p=>p.status==='active'&&p.role==='owner').length;
 const ownDone=()=>db.projects.filter(p=>p.status==='done'&&p.role==='owner').length;
+const isMe=m=>me&&m.userId===me.id;
+const memName=m=>isMe(m)?db.profile.name:m.name;
+const memHandle=m=>isMe(m)?db.profile.handle:m.handle;
+const dispName=m=>memName(m)||(memHandle(m)?'@'+memHandle(m):'프로필 미설정');
+
+/* ---------- DB ↔ 화면 데이터 ---------- */
+function fromRow(r,mems,profs){
+  const d=r.data||{};
+  const perm=r.owner_id===me.id?'owner':(mems.find(m=>m.project_id===r.id&&m.user_id===me.id)?.perm||'viewer');
+  const pm=(u,pr)=>({userId:u,name:profs[u]?.name||'',handle:profs[u]?.handle||'',perm:pr});
+  return {id:r.id,ownerId:r.owner_id,role:perm,owner:profs[r.owner_id]?.name||'',
+    title:r.title,type:r.type,status:r.status,visibility:r.visibility,inHome:r.in_home,due:ts(r.due),goal:r.goal||'',
+    result:r.result,publicCards:r.public_cards||[],metrics:r.metrics,
+    cards:d.cards||[],links:d.links||[],shelf:d.shelf||[],versions:d.versions||[],roles:d.roles||{},
+    members:[pm(r.owner_id,'owner'),...mems.filter(m=>m.project_id===r.id).map(m=>pm(m.user_id,m.perm))],
+    created:ts(r.created_at),updated:ts(r.updated_at),completed:ts(r.completed_at),deletedAt:ts(r.deleted_at)};
+}
+function toRow(p){return {title:p.title,type:p.type,status:p.status,visibility:p.visibility,in_home:!!p.inHome,due:iso(p.due),goal:p.goal||'',
+  result:p.result||null,public_cards:p.publicCards||[],metrics:p.metrics||null,
+  data:{cards:p.cards,links:p.links,shelf:p.shelf,versions:p.versions,roles:p.roles||{}},
+  updated_at:iso(p.updated||now()),completed_at:iso(p.completed),deleted_at:iso(p.deletedAt)}}
+
+async function loadAll(){
+  const [{data:prof,error:e0},{data:myMem,error:e1}]=await Promise.all([
+    sb.from('profiles').select('*').eq('id',me.id).maybeSingle(),
+    sb.from('project_members').select('project_id').eq('user_id',me.id)]);
+  if(e0)throw e0;if(e1)throw e1;
+  const memberIds=(myMem||[]).map(m=>m.project_id);
+  let q=sb.from('projects').select('*');
+  q=memberIds.length?q.or(`owner_id.eq.${me.id},id.in.(${memberIds.join(',')})`):q.eq('owner_id',me.id);
+  const [{data:rows,error:e2},{data:nts},{data:acts}]=await Promise.all([
+    q.order('updated_at',{ascending:false}),
+    sb.from('notifications').select('*').eq('user_id',me.id).order('created_at',{ascending:false}).limit(60),
+    sb.from('activity').select('*').eq('user_id',me.id).order('created_at',{ascending:false}).limit(30)]);
+  if(e2)throw e2;
+  const pids=(rows||[]).map(r=>r.id);
+  let mems=[];if(pids.length){const {data}=await sb.from('project_members').select('*').in('project_id',pids);mems=data||[]}
+  const uids=[...new Set([...(rows||[]).map(r=>r.owner_id),...mems.map(m=>m.user_id)])];
+  const profs={};if(uids.length){const {data}=await sb.from('profiles').select('id,name,handle').in('id',uids);(data||[]).forEach(p=>profs[p.id]=p)}
+  db=emptyDb();
+  if(prof)db.profile={name:prof.name||'',handle:prof.handle||'',intro:prof.intro||'',fields:prof.fields||[]};
+  const cutoff=now()-30*DAY;
+  for(const r of rows||[]){const p=fromRow(r,mems,profs);
+    if(p.deletedAt){if(p.role!=='owner')continue;if(p.deletedAt<cutoff){sb.from('projects').delete().eq('id',p.id).then(()=>{});continue}db.trash.push(p)}else db.projects.push(p)}
+  db.notifications=(nts||[]).map(n=>({id:n.id,kind:n.kind,text:n.text,pid:n.project_id,cid:n.card_id,at:ts(n.created_at),read:n.read}));
+  db.activity=(acts||[]).map(a=>({at:ts(a.created_at),text:a.text,pid:a.project_id}));
+}
+
+/* ---------- 저장 ---------- */
+const dirty=new Set();
+let saveState='saved',saveTimer=null,lastSaved=now(),saving=false;
+function markDirty(p){if(!p||p.role==='viewer')return;p.updated=now();dirty.add(p.id);saveState='saving';paintSave();clearTimeout(saveTimer);saveTimer=setTimeout(flush,900)}
+function changed(){markDirty(cur())}
+async function flush(){
+  clearTimeout(saveTimer);
+  if(saving){saveTimer=setTimeout(flush,500);return}
+  if(!dirty.size){return}
+  saving=true;const ids=[...dirty];dirty.clear();let ok=true;
+  for(const id of ids){const p=anyProj(id);if(!p)continue;const {error}=await sb.from('projects').update(toRow(p)).eq('id',id);if(error){ok=false;dirty.add(id);console.error(error)}}
+  saving=false;
+  if(!ok){saveState='failed';toast('저장하지 못했어요. 인터넷 연결을 확인한 뒤 다시 시도하세요.')}
+  else if(dirty.size){saveState='saving';saveTimer=setTimeout(flush,600)}
+  else{saveState='saved';lastSaved=now()}
+  paintSave();
+}
+window.addEventListener('beforeunload',e=>{if(dirty.size||saving){e.preventDefault();e.returnValue=''}});
+function paintSave(){const el=$('#savestate');if(!el)return;el.className='savestate '+saveState;
+  el.innerHTML=saveState==='saving'?'<i></i>저장 중…':saveState==='failed'?'<i></i><button class="linkbtn" data-act="save-retry">저장 실패 · 다시 시도</button>':`<i></i>저장됨 ${clock(lastSaved)}`}
+
+async function notify(kind,text,pid,cid,userId){
+  const target=userId||me.id;
+  const {data,error}=await sb.from('notifications').insert({user_id:target,kind,text,project_id:pid||null,card_id:cid||null}).select().single();
+  if(error){console.error(error);return}
+  if(target===me.id){db.notifications.unshift({id:data.id,kind,text,pid,cid,at:ts(data.created_at),read:false});paintChrome();if(ui.view==='inbox')render()}
+}
+function logAct(text,pid){db.activity.unshift({at:now(),text,pid});db.activity=db.activity.slice(0,30);sb.from('activity').insert({text,project_id:pid||null}).then(({error})=>error&&console.error(error))}
+
+/* 공개 페이지: 고른 카드만 따로 복사해 둔다. 비공개 자료는 이 표에 들어가지 않는다. */
+const pubResult=p=>{const r=p.result||{};return {url:r.url||'',goal:r.goal||'',period:r.period||'',tools:r.tools||''}};
+function pageCards(p){return (p.publicCards||[]).map(id=>p.cards.find(c=>c.id===id)).filter(Boolean).map(c=>({id:c.id,kind:c.kind,media:c.media||null,title:c.title||'',body:c.body||'',img:c.img||null,frames:c.frames||null,orient:c.orient||null,url:c.media==='youtube'?c.url:null,host:c.host||null}))}
+function pageMembers(p){return p.members.map(m=>({userId:m.userId,name:memName(m)||'',handle:memHandle(m)||'',role:(p.roles||{})[m.userId]||'',owner:m.perm==='owner'}))}
+function pageFromProject(p){return {id:p.id,title:p.title,type:p.type,result:pubResult(p),cards:pageCards(p),members:pageMembers(p)}}
+const shouldPublish=p=>p.completed&&p.visibility==='public'&&!p.deletedAt&&p.status!=='archived';
+async function syncPublicPage(p){
+  if(p.role!=='owner')return;
+  if(shouldPublish(p)){
+    const pg=pageFromProject(p);
+    const {error}=await sb.from('public_pages').upsert({project_id:p.id,owner_id:p.ownerId,title:pg.title,type:pg.type,result:pg.result,cards:pg.cards,members:pg.members,in_home:!!p.inHome,published_at:new Date().toISOString()});
+    if(error){console.error(error);toast('공개 페이지를 저장하지 못했어요')}
+  }else{await sb.from('public_pages').delete().eq('project_id',p.id)}
+}
 
 /* ---------- 공통 UI ---------- */
-let toastT;function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('on');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('on'),2600)}
+let toastT;function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('on');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('on'),2800)}
 let pendingOk=null;
-function modal(html,mount,wide){const m=$('#modal');m.innerHTML=`<div class="modal-back" data-act="close-back"><div class="modal${wide?' wide':''}" role="dialog" aria-modal="true">${html}</div></div>`;m.hidden=false;mount&&mount(m);const f=m.querySelector('input:not([type=radio]):not([type=checkbox]),textarea');(f||m.querySelector('button'))?.focus()}
+function modal(html,mount,wide){const m=$('#modal');m.innerHTML=`<div class="modal-back" data-act="close-back"><div class="modal${wide?' wide':''}" role="dialog" aria-modal="true">${html}</div></div>`;m.hidden=false;mount&&mount(m);const f=m.querySelector('input:not([type=radio]):not([type=checkbox]):not([disabled]),textarea');(f||m.querySelector('button'))?.focus()}
 function closeModal(){const m=$('#modal');m.hidden=true;m.innerHTML='';pendingOk=null}
 function confirmBox(title,text,ok,danger,fn){pendingOk=fn;modal(`<h2>${esc(title)}</h2><p class="muted">${text}</p><div class="mfoot"><button class="btn ghost" data-act="close">취소</button><button class="btn ${danger?'danger':'primary'}" data-act="ok">${esc(ok)}</button></div>`)}
+function busy(btn,on,label){if(!btn)return;if(on){btn.dataset.label=btn.textContent;btn.disabled=true;btn.textContent=label||'처리 중…'}else{btn.disabled=false;btn.textContent=btn.dataset.label||btn.textContent}}
 
 const IC={
   home:'<svg viewBox="0 0 24 24"><path d="M4 11l8-6 8 6v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z"/></svg>',
@@ -454,13 +477,14 @@ const IC={
   bell:'<svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg>'
 };
 function paintChrome(){
+  if(!started){$('#nav').innerHTML='';$('#tabbar').innerHTML='';$('#plan').innerHTML='';return}
   const v=['map','public','trash'].includes(ui.view)?'projects':ui.view;
   const unread=db.notifications.filter(n=>!n.read).length;
   const items=[['home','작업 홈',IC.home],['projects','프로젝트',IC.proj],['creator','Creator Home',IC.user],['inbox','알림함',IC.bell]];
   $('#nav').innerHTML=items.map(([k,l,i])=>`<button class="navbtn" data-act="go" data-view="${k}" ${v===k?'aria-current="page"':''}>${i}${l}${k==='inbox'&&unread?`<span class="badge">${unread}</span>`:''}</button>`).join('');
   $('#tabbar').innerHTML=items.map(([k,l,i])=>`<button data-act="go" data-view="${k}" ${v===k?'aria-current="page"':''}>${i}<span>${k==='creator'?'내 홈':l}</span>${k==='inbox'&&unread?`<span class="badge">${unread}</span>`:''}</button>`).join('');
   const a=ownActive(),d=ownDone();
-  $('#plan').innerHTML=`<div><b>무료 플랜</b> · 기준안</div><div class="planrow"><span>진행 중</span><span>${a}/3</span></div><div class="meter"><i style="width:${Math.min(100,a/3*100)}%"></i></div><div class="planrow"><span>완성</span><span>${d}/3</span></div><div class="meter"><i style="width:${Math.min(100,d/3*100)}%"></i></div><button class="linkbtn small" data-act="reset" style="justify-self:start;margin-top:6px">예시 데이터로 초기화</button>`;
+  $('#plan').innerHTML=`<div><b>무료 플랜</b> · 기준안</div><div class="planrow"><span>진행 중</span><span>${a}/3</span></div><div class="meter"><i style="width:${Math.min(100,a/3*100)}%"></i></div><div class="planrow"><span>완성</span><span>${d}/3</span></div><div class="meter"><i style="width:${Math.min(100,d/3*100)}%"></i></div><div class="account"><span>${esc(me?.email||'')}</span><button class="linkbtn small" data-act="logout" style="justify-self:start">로그아웃</button></div>`;
 }
 
 function miniMap(p,w=260,h=150){
@@ -473,8 +497,53 @@ function miniMap(p,w=260,h=150){
   return `<svg class="mini" viewBox="0 0 ${w} ${h}" aria-hidden="true">${lines}${cs.map(c=>{const q=P(c);return `<rect x="${q.x}" y="${q.y}" width="${220*s}" height="${100*s}" rx="${Math.max(2,8*s)}" style="fill:var(--surface);stroke:var(--k-${c.kind});stroke-width:1.5"/>`}).join('')}</svg>`;
 }
 function progressText(p){const n=k=>p.cards.filter(c=>c.kind===k).length;return [['장면',n('scene')],['자료',n('ref')],['피드백',n('feedback')]].filter(x=>x[1]).map(x=>`${x[0]} ${x[1]}`).join(' · ')||'아직 카드 없음'}
-function progressPct(p){const sc=p.cards.filter(c=>c.kind==='scene').length,fb=p.cards.filter(c=>c.kind==='feedback').length;return Math.min(95,Math.round(15+sc*15+p.cards.filter(c=>c.kind==='ref').length*5-fb*4))}
-function coverOf(p){const cs=(p.publicCards||[]).map(id=>p.cards.find(c=>c.id===id)).filter(Boolean);for(const c of cs){if(c.img)return `<img src="${c.img}" alt="">`;if(c.frames&&c.frames.length)return `<img src="${c.frames[2]?.img||c.frames[0].img}" alt="">`}return miniMap(p,320,180)}
+function progressPct(p){const sc=p.cards.filter(c=>c.kind==='scene').length,fb=p.cards.filter(c=>c.kind==='feedback').length;return clamp(Math.round(15+sc*15+p.cards.filter(c=>c.kind==='ref').length*5-fb*4),5,95)}
+function coverOf(pg){for(const c of pg.cards||[]){if(c.img)return `<img src="${c.img}" alt="">`;if(c.frames&&c.frames.length)return `<img src="${c.frames[2]?.img||c.frames[0].img}" alt="">`}return miniMap({cards:(pg.cards||[]).map((c,i)=>({kind:c.kind,x:(i%3)*260,y:Math.floor(i/3)*160})),links:[]},320,180)}
+const projUrl=id=>`${BASE}?p=${id}`;
+const homeUrl=h=>`${BASE}?u=${encodeURIComponent(h)}`;
+
+/* ---------- 로그인 ---------- */
+function vAuth(){
+  const m=ui.authMode;
+  const head={login:['로그인','작업하던 프로젝트로 돌아가세요.'],signup:['계정 만들기','기획부터 포트폴리오까지 한곳에서 이어가세요.'],reset:['비밀번호 재설정','가입한 이메일로 재설정 링크를 보내 드려요.']}[m];
+  return `<div class="authwrap"><div class="authcard">
+  <div class="brand">${LOGO}Ballacove</div>
+  <div><h1 style="font-size:22px">${head[0]}</h1><p class="muted small" style="margin:4px 0 0">${head[1]}</p></div>
+  <form id="authform" class="stack" novalidate>
+    <label class="field"><span>이메일</span><input id="au-email" type="email" autocomplete="email" required></label>
+    ${m!=='reset'?`<label class="field"><span>비밀번호${m==='signup'?'<em>8자 이상</em>':''}</span><input id="au-pw" type="password" autocomplete="${m==='signup'?'new-password':'current-password'}" required></label>`:''}
+    <p class="formerr" id="au-err" hidden></p><p class="formok" id="au-ok" hidden></p>
+    <button class="btn primary" type="submit" id="au-btn">${m==='signup'?'가입하기':m==='reset'?'재설정 링크 보내기':'로그인'}</button>
+  </form>
+  <div class="small" style="display:flex;gap:14px;flex-wrap:wrap">${m==='login'?`<button class="linkbtn" data-act="auth-mode" data-m="signup">처음이세요? 가입하기</button><button class="linkbtn" data-act="auth-mode" data-m="reset">비밀번호를 잊었어요</button>`:`<button class="linkbtn" data-act="auth-mode" data-m="login">로그인으로 돌아가기</button>`}</div>
+  </div></div>`;
+}
+function authErr(msg){const map=[[/Invalid login credentials/i,'이메일 또는 비밀번호가 맞지 않아요.'],[/Email not confirmed/i,'메일함에서 인증 링크를 먼저 눌러 주세요.'],[/already registered|already exists/i,'이미 가입된 이메일이에요. 로그인해 주세요.'],[/Password should be at least/i,'비밀번호는 8자 이상으로 정해 주세요.'],[/rate limit|too many/i,'요청이 너무 많아요. 잠시 뒤 다시 시도해 주세요.'],[/valid email|invalid format/i,'이메일 주소 형식을 확인해 주세요.']];for(const[r,t]of map)if(r.test(msg))return t;return msg}
+function mountAuth(){
+  const f=$('#authform');if(!f)return;
+  f.addEventListener('submit',async e=>{e.preventDefault();
+    const email=$('#au-email').value.trim(),pw=$('#au-pw')?.value||'';const err=$('#au-err'),ok=$('#au-ok'),btn=$('#au-btn');
+    err.hidden=true;ok.hidden=true;
+    if(!/^\S+@\S+\.\S+$/.test(email)){err.textContent='이메일 주소 형식을 확인해 주세요.';err.hidden=false;return}
+    if(ui.authMode==='signup'&&pw.length<8){err.textContent='비밀번호는 8자 이상으로 정해 주세요.';err.hidden=false;return}
+    if(ui.authMode==='login'&&!pw){err.textContent='비밀번호를 입력해 주세요.';err.hidden=false;return}
+    busy(btn,true);
+    let res;
+    if(ui.authMode==='login')res=await sb.auth.signInWithPassword({email,password:pw});
+    else if(ui.authMode==='signup')res=await sb.auth.signUp({email,password:pw,options:{emailRedirectTo:BASE}});
+    else res=await sb.auth.resetPasswordForEmail(email,{redirectTo:BASE});
+    busy(btn,false);
+    if(res.error){err.textContent=authErr(res.error.message);err.hidden=false;return}
+    if(ui.authMode==='signup'&&!res.data.session){ok.textContent=`${email}로 인증 메일을 보냈어요. 메일의 링크를 누르면 바로 시작할 수 있어요.`;ok.hidden=false}
+    if(ui.authMode==='reset'){ok.textContent='재설정 링크를 보냈어요. 메일의 링크를 누르면 새 비밀번호를 정할 수 있어요.';ok.hidden=false}
+  });
+}
+function openNewPassword(){
+  modal(`<h2>새 비밀번호 정하기</h2><form id="npwform" class="stack" novalidate><label class="field"><span>새 비밀번호<em>8자 이상</em></span><input id="npw" type="password" autocomplete="new-password" required></label><p class="formerr" id="npw-err" hidden></p><div class="mfoot"><button class="btn primary" id="npw-btn">저장</button></div></form>`,m=>{
+    m.querySelector('#npwform').addEventListener('submit',async e=>{e.preventDefault();const v=$('#npw').value;const er=$('#npw-err');if(v.length<8){er.textContent='8자 이상으로 정해 주세요.';er.hidden=false;return}
+      busy($('#npw-btn'),true);const {error}=await sb.auth.updateUser({password:v});busy($('#npw-btn'),false);
+      if(error){er.textContent=authErr(error.message);er.hidden=false;return}closeModal();toast('새 비밀번호를 저장했어요')})});
+}
 
 /* ---------- 작업 홈 ---------- */
 function vHome(){
@@ -485,7 +554,7 @@ function vHome(){
   <header class="pagehead"><div><div class="eyebrow">${fmtDate(now())} · 작업 홈</div><h1>${db.profile.name?esc(db.profile.name)+'님, ':''}이어서 할 작업</h1></div><button class="btn primary" data-act="new-project">새 프로젝트</button></header>
   ${last?`<section class="panel continue">
     <div style="display:grid;gap:10px;min-width:0">
-      <div class="eyebrow">이어서 작업하기 · ${esc(last.type)}${last.role==='editor'?' · 참여 중':''} · ${rel(last.updated)} 수정</div>
+      <div class="eyebrow">이어서 작업하기 · ${esc(last.type)}${last.role!=='owner'?' · 참여 중':''} · ${rel(last.updated)} 수정</div>
       <h2>${esc(last.title)}</h2>
       ${last.goal?`<p class="lede">${esc(last.goal)}</p>`:''}
       <div class="chips">${last.due?`<span class="chip ${sod(last.due)-sod(now())<=DAY?'st-warn':''}">${dDay(last.due)}</span>`:''}<span class="chip">${progressText(last)}</span></div>
@@ -494,22 +563,18 @@ function vHome(){
     <button data-act="open-project" data-id="${last.id}" style="border:0;background:none;padding:0;cursor:pointer" aria-label="${esc(last.title)} 캔버스 열기">${miniMap(last,300,170)}</button>
   </section>`:`<section class="panel empty"><h2>첫 프로젝트를 만들어 보세요</h2><p class="muted" style="margin:0">아이디어 한 줄, 이미지 한 장, 링크 하나면 시작할 수 있어요.</p><button class="btn primary" data-act="new-project">새 프로젝트 만들기</button></section>`}
   <div class="grid2">
-    <section class="panel"><h2>일정·진행 상황</h2><div class="rows">${act.map(p=>`<div class="row"><div class="grow"><button class="t" data-act="open-project" data-id="${p.id}">${esc(p.title)}</button><div class="small muted">${progressText(p)}${p.role==='editor'?' · 참여':''}</div><div class="bar"><i style="width:${progressPct(p)}%"></i></div></div>${p.due?`<span class="chip mono ${sod(p.due)-sod(now())<=DAY?'st-warn':''}">${dDay(p.due)}</span>`:''}</div>`).join('')||'<p class="muted" style="margin:0">진행 중인 프로젝트가 없어요.</p>'}</div></section>
+    <section class="panel"><h2>일정·진행 상황</h2><div class="rows">${act.map(p=>`<div class="row"><div class="grow"><button class="t" data-act="open-project" data-id="${p.id}">${esc(p.title)}</button><div class="small muted">${progressText(p)}${p.role!=='owner'?' · 참여':''}</div><div class="bar"><i style="width:${progressPct(p)}%"></i></div></div>${p.due?`<span class="chip mono ${sod(p.due)-sod(now())<=DAY?'st-warn':''}">${dDay(p.due)}</span>`:''}</div>`).join('')||'<p class="muted" style="margin:0">진행 중인 프로젝트가 없어요.</p>'}</div></section>
     <section class="panel"><h2>최근 활동</h2><div class="rows">${db.activity.slice(0,6).map(a=>`<div class="row act"><div class="grow">${esc(a.text)}</div><time>${rel(a.at)}</time></div>`).join('')||'<p class="muted" style="margin:0">아직 활동이 없어요.</p>'}</div></section>
   </div>
-  <section class="panel"><div class="panelhead"><h2>연결한 콘텐츠 성과</h2><span class="chip">예시 데이터 · YouTube</span></div>
-    ${done.length?done.map(perfBlock).join(''):'<p class="muted" style="margin:0">완성한 프로젝트에 YouTube 콘텐츠를 연결하면 여기에 지표가 보여요.</p>'}
-  </section>
-  </div>`;
+  <section class="panel"><div class="panelhead"><h2>연결한 콘텐츠 성과</h2></div>
+    ${done.length?done.map(perfBlock).join(''):'<p class="muted" style="margin:0">프로젝트를 완성하면서 YouTube 결과물을 연결하면 여기에 모여요.</p>'}
+  </section></div>`;
 }
 function perfBlock(p){
   const m=p.metrics;
-  let body;
-  if(!m)body=`<p class="muted small" style="margin:0">연결한 콘텐츠가 없어요.</p>`;
-  else if(m.status==='expired')body=`<div class="row" style="padding:0;border:0;flex-wrap:wrap"><span class="chip st-bad">연결 만료</span><span class="small muted grow">새 지표를 가져올 수 없어요. 이전에 받은 수치를 추정해서 보여 주지 않아요.</span><button class="btn sm" data-act="reconnect" data-id="${p.id}">다시 연결</button></div>`;
-  else if(m.status==='pending')body=`<div class="row" style="padding:0;border:0"><span class="chip st-warn">지표 대기 중</span><span class="small muted">게시 후 첫 집계가 들어오면 표시돼요.</span></div>`;
-  else body=`<div class="metrics"><div class="metric"><span>조회수</span><b>${num(m.views)}</b></div><div class="metric"><span>좋아요</span><b>${num(m.likes)}</b></div><div class="metric"><span>댓글</span><b>${num(m.comments)}</b></div><div class="metric"><span>평균 시청 지속 시간</span><b class="na">이 계정에서 제공되지 않음</b></div></div>`;
-  return `<div class="perf"><div class="panelhead"><button class="linkbtn" data-act="open-project" data-id="${p.id}" style="font-weight:600;text-decoration:none;color:var(--ink)">${esc(p.title)}</button>${m&&m.status==='ok'?`<span class="chip st-ok">연결됨 · ${rel(m.checked)} 확인</span>`:''}</div>${body}</div>`;
+  const body=!m?`<p class="muted small" style="margin:0">결과물 링크를 연결하지 않았어요.</p>`
+    :`<div class="row" style="padding:0;border:0;flex-wrap:wrap"><span class="chip st-warn">지표 연동 준비 중</span><span class="small muted grow">YouTube 계정 연결은 아직 준비 중이에요. 연결되면 YouTube가 제공하는 지표만 그대로 보여 드려요.</span></div>`;
+  return `<div class="perf"><div class="panelhead"><button class="linkbtn" data-act="open-project" data-id="${p.id}" style="font-weight:600;text-decoration:none;color:var(--ink)">${esc(p.title)}</button></div>${body}</div>`;
 }
 
 /* ---------- 프로젝트 ---------- */
@@ -529,34 +594,35 @@ function prow(p){
   if(own&&p.status==='active')acts=`<button class="btn sm ghost" data-act="archive" data-id="${p.id}">보관</button><button class="btn sm ghost" data-act="del-project" data-id="${p.id}">삭제</button>`;
   if(own&&p.status==='done')acts=`<button class="btn sm ghost" data-act="reopen" data-id="${p.id}">다시 작업</button><button class="btn sm ghost" data-act="archive" data-id="${p.id}">보관</button>`;
   if(own&&p.status==='archived')acts=`<button class="btn sm ghost" data-act="unarchive" data-id="${p.id}">진행 중으로</button><button class="btn sm ghost" data-act="del-project" data-id="${p.id}">삭제</button>`;
-  return `<div class="prow"><button class="prow-main" data-act="open-project" data-id="${p.id}">${miniMap(p,160,96)}<div style="min-width:0"><h3>${esc(p.title)}</h3><div class="chips"><span class="chip">${esc(p.type)}</span><span class="chip ${own?'':'st-ok'}">${own?'소유':p.owner?'참여 · '+esc(p.owner):'참여'}</span><span class="chip">${p.visibility==='public'?'공개':'비공개'}</span>${p.status==='active'&&p.due?`<span class="chip mono">${dDay(p.due)}</span>`:''}<span class="chip">${rel(p.updated)} 수정</span></div></div></button><div class="prow-acts">${acts}</div></div>`;
+  return `<div class="prow"><button class="prow-main" data-act="open-project" data-id="${p.id}">${miniMap(p,160,96)}<div style="min-width:0"><h3>${esc(p.title)}</h3><div class="chips"><span class="chip">${esc(p.type)}</span><span class="chip ${own?'':'st-ok'}">${own?'소유':'참여 · '+PERM[p.role]}</span><span class="chip">${p.visibility==='public'&&p.completed?'공개':'비공개'}</span>${p.members.length>1?`<span class="chip">${p.members.length}명</span>`:''}${p.status==='active'&&p.due?`<span class="chip mono">${dDay(p.due)}</span>`:''}<span class="chip">${rel(p.updated)} 수정</span></div></div></button><div class="prow-acts">${acts}</div></div>`;
 }
 function vTrash(){
   return `<div class="page"><header class="pagehead"><div><div class="eyebrow">삭제 후 30일이 지나면 영구 삭제돼요</div><h1>휴지통</h1></div><button class="btn ghost" data-act="go" data-view="projects">프로젝트로</button></header>
-  <div class="plist">${db.trash.map(p=>{const left=30-Math.floor((now()-p.deletedAt)/DAY);return `<div class="prow"><div style="flex:1 1 220px;min-width:0"><h3>${esc(p.title)}</h3><div class="chips"><span class="chip">${fmtDate(p.deletedAt)} 삭제</span><span class="chip ${left<=5?'st-warn':''}">${left}일 남음</span></div></div><div class="prow-acts"><button class="btn sm" data-act="restore" data-id="${p.id}">복구</button><button class="btn sm danger" data-act="purge" data-id="${p.id}">영구 삭제</button></div></div>`}).join('')||'<div class="panel empty"><p class="muted" style="margin:0">휴지통이 비어 있어요.</p></div>'}</div>
-  <p class="small muted" style="margin:0">함께 작업한 프로젝트는 한 사람이 삭제해도 다른 참여자의 작업·경력 기록이 함께 사라지지 않아요.</p></div>`;
+  <div class="plist">${db.trash.map(p=>{const left=Math.max(0,30-Math.floor((now()-p.deletedAt)/DAY));return `<div class="prow"><div style="flex:1 1 220px;min-width:0"><h3>${esc(p.title)}</h3><div class="chips"><span class="chip">${fmtDate(p.deletedAt)} 삭제</span><span class="chip ${left<=5?'st-warn':''}">${left}일 남음</span></div></div><div class="prow-acts"><button class="btn sm" data-act="restore" data-id="${p.id}">복구</button><button class="btn sm danger" data-act="purge" data-id="${p.id}">영구 삭제</button></div></div>`}).join('')||'<div class="panel empty"><p class="muted" style="margin:0">휴지통이 비어 있어요.</p></div>'}</div>
+  <p class="small muted" style="margin:0">휴지통에 있는 동안에는 참여자에게도 보이지 않아요. 영구 삭제하면 참여자 목록도 함께 지워져요.</p></div>`;
 }
 
 /* ---------- Cove Map ---------- */
+const ro=p=>p.role==='viewer';
 function vMap(p){
-  const own=p.role==='owner';
-  return `<div class="mapview">
+  const own=p.role==='owner',r=ro(p);
+  return `<div class="mapview${r?' ro':''}">
   <div class="maptop">
     <button class="btn ghost sm" data-act="go" data-view="projects" aria-label="프로젝트 목록으로">← 목록</button>
     <input class="maptitle" id="map-title" value="${esc(p.title)}" aria-label="프로젝트 이름" ${own?'':'readonly title="프로젝트 이름은 소유자만 바꿀 수 있어요"'}>
-    <span class="chip">${esc(p.type)}</span>${own?'':`<span class="chip st-ok">참여 · 편집</span>`}
-    <span id="savestate" class="savestate"></span>
+    <span class="chip">${esc(p.type)}</span>${own?'':`<span class="chip st-ok">참여 · ${PERM[p.role]}</span>`}
+    ${r?'<span class="chip">보기 전용</span>':'<span id="savestate" class="savestate"></span>'}
     <div class="topacts">
-      <button class="btn ghost sm" data-act="undo" title="Ctrl+Z">되돌리기</button>
-      <button class="btn ghost sm" data-act="redo" title="Ctrl+Shift+Z">다시 실행</button>
+      ${r?'':`<button class="btn ghost sm" data-act="undo" title="Ctrl+Z">되돌리기</button><button class="btn ghost sm" data-act="redo" title="Ctrl+Shift+Z">다시 실행</button>`}
       <button class="btn ghost sm" data-act="versions">버전</button>
+      <button class="btn ghost sm" data-act="members">참여자 ${p.members.length}</button>
       ${own?'<button class="btn primary sm" data-act="complete">완성하기</button>':''}
     </div>
   </div>
   <div class="mapbody">
     <div class="stage" id="stage">
       <div class="world" id="world"><svg class="wires" id="wires"></svg><div id="cards"></div></div>
-      <div class="hint" id="hint" hidden><div><b>여기서 시작해 보세요</b>아이디어를 한 줄 쓰거나, 이미지를 붙여넣거나, 참고 링크를 넣으면 알맞은 카드로 바뀌어요.<span class="small">빈 곳을 두 번 누르면 아이디어 카드가 생겨요.</span></div></div>
+      <div class="hint" id="hint" hidden><div>${r?'<b>아직 카드가 없어요</b>편집 참여자가 카드를 추가하면 여기에 보여요.':'<b>여기서 시작해 보세요</b>아이디어를 한 줄 쓰거나, 이미지를 붙여넣거나, 참고 링크를 넣으면 알맞은 카드로 바뀌어요.<span class="small">빈 곳을 두 번 누르면 아이디어 카드가 생겨요.</span>'}</div></div>
       <div class="linkbanner" id="linkbanner" hidden></div>
       <div class="zoomctl"><button data-act="zoom" data-f="0.8" aria-label="축소">−</button><span id="zoomv">100%</span><button data-act="zoom" data-f="1.25" aria-label="확대">+</button><button data-act="fit">맞춤</button></div>
       <div class="toolbar" role="toolbar" aria-label="카드 추가">
@@ -589,7 +655,7 @@ function mediaHTML(c,big){
     case 'youtube':return `<div class="yt"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg><span>YouTube</span></div>`;
     case 'link':return `<div class="linkline">${esc(c.host||c.url)}</div>`;
     case 'tool':return `<div class="filebox"><b>${esc((c.host||'').slice(0,6))}</b><span>${esc(c.url)}</span></div>`;
-    case 'pdf':case 'doc':case 'psd':{const ext=(c.fileName||'').split('.').pop().toUpperCase()||c.media.toUpperCase();return `<div class="filebox"><b>${esc(ext.slice(0,4))}</b><span>${esc(c.fileName||c.url||'')}${c.size?` · ${(c.size/1048576).toFixed(1)}MB`:''}</span></div>${big&&c.media==='psd'?'<div class="note">레이어 편집은 지원하지 않아요. 합성 미리보기만 생성돼요.</div>':''}${big&&c.media==='pdf'?'<div class="note">첫 페이지·쪽 수 미리보기는 정식 버전에서 생성돼요.</div>':''}`}
+    case 'pdf':case 'doc':case 'psd':{const ext=(c.fileName||'').split('.').pop().toUpperCase()||c.media.toUpperCase();return `<div class="filebox"><b>${esc(ext.slice(0,4))}</b><span>${esc(c.fileName||c.url||'')}${c.size?` · ${(c.size/1048576).toFixed(1)}MB`:''}</span></div>${big?'<div class="note">파일 원본은 저장되지 않고 이름과 메모만 남아요. 원본은 외부 저장소 링크로 연결하세요.</div>':''}`}
   }
   return '';
 }
@@ -599,7 +665,7 @@ function cardHTML(c){
   <div class="cardhead"><span class="chip kchip">${kindLabel(c)}</span>${c.due?`<span class="due${over?' over':''}">${dDay(c.due)}</span>`:''}</div>
   ${mediaHTML(c,false)}<h3>${esc(c.title||'제목 없음')}</h3>${c.body?`<p>${esc(c.body)}</p>`:''}${c.who?`<div class="who">담당 ${esc(c.who)}</div>`:''}</article>`;
 }
-function renderCards(){const p=cur();$('#cards').innerHTML=p.cards.map(cardHTML).join('');$('#hint').hidden=p.cards.length>0;drawWires();const sb=document.querySelector('[data-act="shelf"] .mono');if(sb)sb.textContent=p.shelf.length}
+function renderCards(){const p=cur();$('#cards').innerHTML=p.cards.map(cardHTML).join('');$('#hint').hidden=p.cards.length>0;drawWires();const sb2=document.querySelector('[data-act="shelf"] .mono');if(sb2)sb2.textContent=p.shelf.length}
 function updateCardEl(c){const el=document.querySelector(`.card[data-id="${c.id}"]`);if(!el)return;el.outerHTML=cardHTML(c);drawWires()}
 function drawWires(){
   const p=cur(),svg=$('#wires');if(!svg||!p)return;
@@ -609,31 +675,32 @@ function drawWires(){
     if(A.x+A.w<B.x||B.x+B.w<A.x){const[L,R]=A.x<B.x?[A,B]:[B,A];x1=L.x+L.w;y1=L.y+L.h/2;x2=R.x;y2=R.y+R.h/2;const dx=Math.max(30,(x2-x1)/2);return `<path d="M${x1},${y1} C${x1+dx},${y1} ${x2-dx},${y2} ${x2},${y2}"/><circle cx="${x1}" cy="${y1}" r="3"/><circle cx="${x2}" cy="${y2}" r="3"/>`}
     const[T,Bo]=A.y<B.y?[A,B]:[B,A];x1=T.x+T.w/2;y1=T.y+T.h;x2=Bo.x+Bo.w/2;y2=Bo.y;const dy=Math.max(24,(y2-y1)/2);return `<path d="M${x1},${y1} C${x1},${y1+dy} ${x2},${y2-dy} ${x2},${y2}"/><circle cx="${x1}" cy="${y1}" r="3"/><circle cx="${x2}" cy="${y2}" r="3"/>`}).join('');
 }
-function applyView(){const p=cur(),v=p.view,st=$('#stage');if(!st)return;$('#world').style.transform=`translate(${v.x}px,${v.y}px) scale(${v.z})`;st.style.backgroundSize=`${22*v.z}px ${22*v.z}px`;st.style.backgroundPosition=`${v.x}px ${v.y}px`;$('#zoomv').textContent=Math.round(v.z*100)+'%'}
-function zoomAt(mx,my,f){const v=cur().view;const nz=clamp(v.z*f,.3,2.2);const k=nz/v.z;v.x=mx-(mx-v.x)*k;v.y=my-(my-v.y)*k;v.z=nz;applyView()}
+const views={};
+const V=()=>views[ui.pid]||(views[ui.pid]={x:40,y:40,z:1});
+function applyView(){const v=V(),st=$('#stage');if(!st)return;$('#world').style.transform=`translate(${v.x}px,${v.y}px) scale(${v.z})`;st.style.backgroundSize=`${22*v.z}px ${22*v.z}px`;st.style.backgroundPosition=`${v.x}px ${v.y}px`;$('#zoomv').textContent=Math.round(v.z*100)+'%'}
+function zoomAt(mx,my,f){const v=V();const nz=clamp(v.z*f,.3,2.2);const k=nz/v.z;v.x=mx-(mx-v.x)*k;v.y=my-(my-v.y)*k;v.z=nz;applyView()}
 function fit(){
   const p=cur(),st=$('#stage');if(!st)return;
-  if(!p.cards.length){p.view={x:40,y:40,z:1};applyView();return}
+  if(!p.cards.length){views[ui.pid]={x:40,y:40,z:1};applyView();return}
   let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
   p.cards.forEach(c=>{const el=document.querySelector(`.card[data-id="${c.id}"]`);const h=el?el.offsetHeight:120;x0=Math.min(x0,c.x);y0=Math.min(y0,c.y);x1=Math.max(x1,c.x+220);y1=Math.max(y1,c.y+h)});
   const W=st.clientWidth,H=st.clientHeight-64;
   const z=clamp(Math.min((W-40)/(x1-x0),(H-40)/(y1-y0)),.3,1.1);
-  p.view={z,x:(W-(x1-x0)*z)/2-x0*z,y:Math.max(16,(H-(y1-y0)*z)/2)-y0*z};applyView();
+  views[ui.pid]={z,x:(W-(x1-x0)*z)/2-x0*z,y:Math.max(16,(H-(y1-y0)*z)/2)-y0*z};applyView();
 }
-function centerPt(){const st=$('#stage'),v=cur().view;return {x:(st.clientWidth/2-v.x)/v.z,y:(st.clientHeight/2-40-v.y)/v.z}}
-function toWorld(cx,cy){const r=$('#stage').getBoundingClientRect(),v=cur().view;return {x:(cx-r.left-v.x)/v.z,y:(cy-r.top-v.y)/v.z}}
+function centerPt(){const st=$('#stage'),v=V();return {x:(st.clientWidth/2-v.x)/v.z,y:(st.clientHeight/2-40-v.y)/v.z}}
+function toWorld(cx,cy){const r=$('#stage').getBoundingClientRect(),v=V();return {x:(cx-r.left-v.x)/v.z,y:(cy-r.top-v.y)/v.z}}
 
-/* 실행 취소 */
 const H=()=>hist[ui.pid]||(hist[ui.pid]={u:[],r:[]});
 const snap=p=>JSON.stringify({cards:p.cards,links:p.links,shelf:p.shelf});
 function checkpoint(s){const h=H();h.u.push(s||snap(cur()));if(h.u.length>60)h.u.shift();h.r=[]}
 function restoreSnap(s){const p=cur(),o=JSON.parse(s);p.cards=o.cards;p.links=o.links;p.shelf=o.shelf||[];if(!p.cards.find(c=>c.id===ui.sel))ui.sel=null;renderCards();renderDetail();changed()}
-function undo(){const h=H();if(!h.u.length)return toast('되돌릴 작업이 없어요');h.r.push(snap(cur()));restoreSnap(h.u.pop())}
-function redo(){const h=H();if(!h.r.length)return toast('다시 실행할 작업이 없어요');h.u.push(snap(cur()));restoreSnap(h.r.pop())}
+function undo(){if(ro(cur()))return;const h=H();if(!h.u.length)return toast('되돌릴 작업이 없어요');h.r.push(snap(cur()));restoreSnap(h.u.pop())}
+function redo(){if(ro(cur()))return;const h=H();if(!h.r.length)return toast('다시 실행할 작업이 없어요');h.u.push(snap(cur()));restoreSnap(h.r.pop())}
 
 const DEF={idea:'새 아이디어',intro:'도입부',memo:'메모',feedback:'수정 의견'};
 function addCard(kind,extra={},opts={}){
-  const p=cur();checkpoint();
+  const p=cur();if(ro(p))return null;checkpoint();
   const at=extra.at||centerPt();delete extra.at;
   const c=Object.assign({id:uid(),kind,title:kind==='scene'?`장면 ${p.cards.filter(x=>x.kind==='scene').length+1}`:(DEF[kind]||''),body:'',created:now(),public:kind!=='feedback'},extra);
   c.x=Math.round(at.x-110+(opts.exact?0:Math.random()*30-15));c.y=Math.round(at.y-40+(opts.exact?0:Math.random()*30-15));
@@ -645,7 +712,7 @@ function setSel(id){ui.sel=id;document.querySelectorAll('#cards .card').forEach(
 function setLinkFrom(id){
   ui.linkFrom=id;document.querySelectorAll('#cards .card').forEach(el=>el.classList.toggle('linksrc',el.dataset.id===id));
   const b=$('#linkbanner'),btn=$('#linkbtn');if(btn)btn.setAttribute('aria-pressed',id!==null?'true':'false');
-  if(id===null){b.hidden=true;return}
+  if(!b)return;if(id===null){b.hidden=true;return}
   b.hidden=false;b.innerHTML=id?`<span>연결할 카드를 누르세요. 이미 연결된 카드를 누르면 연결이 해제돼요.</span><button data-act="link-cancel">취소</button>`:`<span>연결을 시작할 카드를 누르세요</span><button data-act="link-cancel">취소</button>`;
 }
 function toggleLink(a,b){const p=cur();checkpoint();const i=p.links.findIndex(l=>l.includes(a)&&l.includes(b));if(i>=0){p.links.splice(i,1);toast('연결을 해제했어요')}else{p.links.push([a,b]);toast('연결했어요')}drawWires();renderDetail();changed()}
@@ -660,17 +727,19 @@ function source(c){
 function renderDetail(){
   const d=$('#detail');if(!d)return;const p=cur();const c=p&&p.cards.find(x=>x.id===ui.sel);
   if(!c){d.hidden=true;d.innerHTML='';return}
+  const r=ro(p),dis=r?'disabled':'';
   d.hidden=false;
   const linked=p.links.filter(l=>l.includes(c.id)).map(l=>l[0]===c.id?l[1]:l[0]).map(id=>p.cards.find(x=>x.id===id)).filter(Boolean);
   d.innerHTML=`<div class="dhead"><span class="chip kchip k-${c.kind}">${c.kind==='ref'?'참고자료 · ':''}${kindLabel(c)}</span><button class="btn ghost sm" data-act="d-close">닫기</button></div>
-  <label class="field"><span>제목</span><input id="d-title" value="${esc(c.title)}"></label>
-  <label class="field"><span>${c.kind==='ref'?'활용 메모':'내용'}</span><textarea id="d-body" rows="4">${esc(c.body||'')}</textarea></label>
-  ${c.kind==='feedback'?`<div class="row2"><label class="field"><span>담당</span><input id="d-who" value="${esc(c.who||'')}"></label><label class="field"><span>기한</span><input type="date" id="d-due" value="${c.due?isoDate(c.due):''}"></label></div>`:''}
+  <label class="field"><span>제목</span><input id="d-title" value="${esc(c.title)}" ${dis}></label>
+  <label class="field"><span>${c.kind==='ref'?'활용 메모':'내용'}</span><textarea id="d-body" rows="4" ${dis}>${esc(c.body||'')}</textarea></label>
+  ${c.kind==='feedback'?`<div class="row2"><label class="field"><span>담당</span><input id="d-who" value="${esc(c.who||'')}" ${dis}></label><label class="field"><span>기한</span><input type="date" id="d-due" value="${c.due?isoDate(c.due):''}" ${dis}></label></div>`:''}
   ${mediaHTML(c,true)}
   <dl class="meta"><dt>출처·원본</dt><dd>${source(c)}</dd><dt>생성 시점</dt><dd class="mono">${fmtDT(c.created)}</dd></dl>
   <div><div class="eyebrow">연결된 항목 ${linked.length}</div><div class="linked">${linked.map(x=>`<button class="chip kchip k-${x.kind}" data-act="select" data-id="${x.id}">${esc(x.title||'제목 없음')}</button>`).join('')||'<span class="small muted">아직 연결이 없어요</span>'}</div></div>
-  <label class="check"><input type="checkbox" id="d-public" ${c.public?'checked':''}><span>완성 페이지에 공개해도 되는 자료<br><span class="small muted">끄면 공개 페이지를 만들 때 이 카드는 노출되지 않아요.</span></span></label>
-  <div class="dacts"><button class="btn sm" data-act="d-link">다른 카드와 연결</button><button class="btn sm ghost" data-act="d-shelve">캔버스에서 지우기</button><button class="btn sm danger" data-act="d-delete">자료 삭제</button></div>`;
+  ${r?'':`<label class="check"><input type="checkbox" id="d-public" ${c.public?'checked':''}><span>완성 페이지에 공개해도 되는 자료<br><span class="small muted">끄면 공개 페이지를 만들 때 이 카드는 노출되지 않아요.</span></span></label>
+  <div class="dacts"><button class="btn sm" data-act="d-link">다른 카드와 연결</button><button class="btn sm ghost" data-act="d-shelve">캔버스에서 지우기</button><button class="btn sm danger" data-act="d-delete">자료 삭제</button></div>`}`;
+  if(r)return;
   let cp=false;const once=()=>{if(!cp){checkpoint();cp=true}};
   const bind=(id,fn)=>{const el=$(id);if(!el)return;el.addEventListener('focus',once);el.addEventListener('input',()=>{fn(el);updateCardEl(c);changed()})};
   bind('#d-title',el=>c.title=el.value);bind('#d-body',el=>c.body=el.value);bind('#d-who',el=>c.who=el.value);
@@ -690,17 +759,17 @@ async function extractFrames(file,c){
     await new Promise((res,rej)=>{v.onloadeddata=res;v.onerror=()=>rej(new Error('이 형식의 영상은 열 수 없어요'));setTimeout(()=>rej(new Error('영상 정보를 읽지 못했어요')),12000)});
     if(!isFinite(v.duration)||!v.videoWidth)throw new Error('영상 길이를 확인할 수 없어요');
     const vert=v.videoHeight>v.videoWidth;
-    // 기준은 1280×720(세로 720×1280). 프로토타입은 브라우저 저장 공간 때문에 축소 저장.
-    const s=Math.min(1,(vert?480:480)/Math.max(v.videoWidth,v.videoHeight));
+    const s=Math.min(1,480/Math.max(v.videoWidth,v.videoHeight));
     const cv=document.createElement('canvas');cv.width=Math.round(v.videoWidth*s);cv.height=Math.round(v.videoHeight*s);const x=cv.getContext('2d');
     for(const pct of [.1,.3,.5,.7,.9]){await seek(v,v.duration*pct);x.drawImage(v,0,0,cv.width,cv.height);c.frames.push({t:v.duration*pct,img:cv.toDataURL('image/jpeg',.7)});c.procDone++;refresh()}
     c.procState='done';c.duration=v.duration;c.orient=vert?'v':'h';
     toast('대표 장면 5장을 만들고 업로드 원본은 삭제했어요');
-  }catch(err){c.procState='failed';c.procError=err.message;c.frames=[];const p=proj(pid);notify('alert',`‘${c.title}’ 영상 처리에 실패했어요. 원본은 보관되지 않으니 파일을 다시 올려 주세요.`,pid,c.id);paintChrome();p&&(p.updated=now())}
-  finally{v.removeAttribute('src');v.load();URL.revokeObjectURL(url);refresh();quiet()}
+  }catch(err){c.procState='failed';c.procError=err.message;c.frames=[];notify('alert',`‘${c.title}’ 영상 처리에 실패했어요. 원본은 보관되지 않으니 파일을 다시 올려 주세요.`,pid,c.id)}
+  finally{v.removeAttribute('src');v.load();URL.revokeObjectURL(url);refresh();markDirty(proj(pid))}
 }
 let retryFor=null;
 async function addFiles(files,at){
+  if(ro(cur()))return;
   let i=0;
   for(const f of files){
     const pt=at?{x:at.x+i*30,y:at.y+i*30}:undefined;i++;
@@ -722,10 +791,8 @@ function classify(u){let h;try{h=new URL(u).hostname.replace(/^www\./,'')}catch(
 function addLink(url,title,memo,at){const k=classify(url);if(!k){toast('주소 형식을 확인해 주세요');return}
   addCard('ref',Object.assign({url,title:title||(k.media==='youtube'?'YouTube 영상':k.media==='tool'?`${k.host} 자료`:k.host),body:memo||'',at},k),{noFocus:!!at})}
 
-/* 맵 마운트 */
 function mountMap(){
-  const p=cur(),st=$('#stage');
-  if(!p.view)p.view={x:40,y:40,z:1};
+  const p=cur(),st=$('#stage'),r=ro(p);
   renderCards();applyView();paintSave();
   requestAnimationFrame(()=>{fit();if(ui.sel)renderDetail()});
   if(ui.linkFrom!==null)setLinkFrom(ui.linkFrom);
@@ -734,15 +801,16 @@ function mountMap(){
     if(e.target.closest('.toolbar,.zoomctl,.linkbanner,button,a,input,textarea'))return;
     if(e.button!==0&&e.pointerType==='mouse')return;
     st.setPointerCapture(e.pointerId);ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
-    const v=p.view;
+    const v=V();
     if(ptrs.size===2){const[a,b]=[...ptrs.values()];drag={type:'pinch',d0:Math.hypot(a.x-b.x,a.y-b.y),z0:v.z,x0:v.x,y0:v.y,m0:{x:(a.x+b.x)/2,y:(a.y+b.y)/2}};return}
     const el=e.target.closest('.card');
-    if(el){const c=p.cards.find(x=>x.id===el.dataset.id);drag={type:'card',id:c.id,el,sx:e.clientX,sy:e.clientY,ox:c.x,oy:c.y,moved:false,snap:snap(p)}}
+    if(el&&r)drag={type:'tap',id:el.dataset.id,sx:e.clientX,sy:e.clientY,ox:v.x,oy:v.y,moved:false};
+    else if(el){const c=p.cards.find(x=>x.id===el.dataset.id);drag={type:'card',id:c.id,el,sx:e.clientX,sy:e.clientY,ox:c.x,oy:c.y,moved:false,snap:snap(p)}}
     else drag={type:'pan',sx:e.clientX,sy:e.clientY,ox:v.x,oy:v.y,moved:false};
   });
   st.addEventListener('pointermove',e=>{
-    if(!ptrs.has(e.pointerId)||!drag)return;ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});const v=p.view;
-    if(drag.type==='pinch'){if(ptrs.size<2)return;const[a,b]=[...ptrs.values()];const r=st.getBoundingClientRect();const m={x:(a.x+b.x)/2,y:(a.y+b.y)/2};const nz=clamp(drag.z0*Math.hypot(a.x-b.x,a.y-b.y)/drag.d0,.3,2.2);const k=nz/drag.z0;const mx=drag.m0.x-r.left,my=drag.m0.y-r.top;v.x=mx-(mx-drag.x0)*k+(m.x-drag.m0.x);v.y=my-(my-drag.y0)*k+(m.y-drag.m0.y);v.z=nz;applyView();return}
+    if(!ptrs.has(e.pointerId)||!drag)return;ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});const v=V();
+    if(drag.type==='pinch'){if(ptrs.size<2)return;const[a,b]=[...ptrs.values()];const rc=st.getBoundingClientRect();const m={x:(a.x+b.x)/2,y:(a.y+b.y)/2};const nz=clamp(drag.z0*Math.hypot(a.x-b.x,a.y-b.y)/drag.d0,.3,2.2);const k=nz/drag.z0;const mx=drag.m0.x-rc.left,my=drag.m0.y-rc.top;v.x=mx-(mx-drag.x0)*k+(m.x-drag.m0.x);v.y=my-(my-drag.y0)*k+(m.y-drag.m0.y);v.z=nz;applyView();return}
     const dx=e.clientX-drag.sx,dy=e.clientY-drag.sy;
     if(!drag.moved&&Math.hypot(dx,dy)<5)return;
     if(!drag.moved){drag.moved=true;if(drag.type==='card')drag.el.classList.add('dragging');else st.classList.add('panning')}
@@ -752,15 +820,17 @@ function mountMap(){
   const end=(e,cancel)=>{
     if(!ptrs.has(e.pointerId))return;ptrs.delete(e.pointerId);
     if(!drag)return;const d=drag;
-    if(d.type==='pinch'){if(ptrs.size===0)drag=null;else drag=null;return}
+    if(d.type==='pinch'){drag=null;return}
     drag=null;st.classList.remove('panning');
+    if(d.type==='tap'){if(!d.moved&&!cancel)setSel(d.id);return}
     if(d.type==='card'){d.el.classList.remove('dragging');
       if(d.moved){checkpoint(d.snap);changed()}
       else if(!cancel){if(ui.linkFrom===''){setLinkFrom(d.id)}else if(ui.linkFrom){if(ui.linkFrom!==d.id)toggleLink(ui.linkFrom,d.id);setLinkFrom(null);setSel(d.id)}else setSel(d.id)}
     }else if(!d.moved&&!cancel){if(ui.linkFrom!==null)setLinkFrom(null);else setSel(null)}
   };
   st.addEventListener('pointerup',e=>end(e,false));st.addEventListener('pointercancel',e=>end(e,true));
-  st.addEventListener('wheel',e=>{e.preventDefault();const r=st.getBoundingClientRect();if(e.ctrlKey||e.metaKey||Math.abs(e.deltaY)>Math.abs(e.deltaX)&&!e.shiftKey&&e.deltaMode===0&&Math.abs(e.deltaY)>=40){zoomAt(e.clientX-r.left,e.clientY-r.top,Math.exp(-e.deltaY*.0018))}else{p.view.x-=e.deltaX;p.view.y-=e.deltaY;applyView()}},{passive:false});
+  st.addEventListener('wheel',e=>{e.preventDefault();const rc=st.getBoundingClientRect();if(e.ctrlKey||e.metaKey||Math.abs(e.deltaY)>Math.abs(e.deltaX)&&!e.shiftKey&&e.deltaMode===0&&Math.abs(e.deltaY)>=40){zoomAt(e.clientX-rc.left,e.clientY-rc.top,Math.exp(-e.deltaY*.0018))}else{const v=V();v.x-=e.deltaX;v.y-=e.deltaY;applyView()}},{passive:false});
+  if(r)return;
   st.addEventListener('dblclick',e=>{if(e.target.closest('.card,.toolbar,.zoomctl,.linkbanner'))return;addCard('idea',{at:toWorld(e.clientX,e.clientY)},{exact:true})});
   st.addEventListener('dragover',e=>{if([...e.dataTransfer.types].includes('Files')){e.preventDefault();st.classList.add('dropping')}});
   st.addEventListener('dragleave',()=>st.classList.remove('dropping'));
@@ -778,8 +848,8 @@ function openNewProject(){
   <fieldset class="field"><legend>시작 구성</legend><div class="starts"><label class="start"><input type="radio" name="np-start" value="kit" checked><span><b>기본 구성</b><small>아이디어 · 도입부 · 참고자료 · 장면 카드가 놓여 있어요</small></span></label><label class="start"><input type="radio" name="np-start" value="blank"><span><b>빈 캔버스</b><small>처음부터 자유롭게</small></span></label></div></fieldset>
   <label class="field"><span>마감일<em>선택</em></span><input type="date" id="np-due"></label>
   <p class="small muted">새 프로젝트는 비공개로 시작해요. 공개 범위는 완성할 때 고를 수 있어요.</p>
-  <div class="mfoot"><button type="button" class="btn ghost" data-act="close">취소</button><button class="btn primary" type="submit">만들고 시작하기</button></div></form>`,m=>{
-    m.querySelector('#npform').addEventListener('submit',e=>{e.preventDefault();
+  <div class="mfoot"><button type="button" class="btn ghost" data-act="close">취소</button><button class="btn primary" type="submit" id="np-btn">만들고 시작하기</button></div></form>`,m=>{
+    m.querySelector('#npform').addEventListener('submit',async e=>{e.preventDefault();
       const title=$('#np-title').value.trim();if(!title)return;
       const type=m.querySelector('[name=np-type]:checked').value,kit=m.querySelector('[name=np-start]:checked').value==='kit';
       const dv=$('#np-due').value;const t=now();
@@ -790,63 +860,95 @@ function openNewProject(){
         {id:uid(),kind:'scene',x:600,y:40,title:'장면 1',body:'',created:t,public:true},
         {id:uid(),kind:'scene',x:600,y:200,title:'장면 2',body:'',created:t,public:true}]:[];
       const links=kit?[[cards[0].id,cards[1].id],[cards[1].id,cards[3].id]]:[];
-      const p={id:uid(),title,type,status:'active',role:'owner',visibility:'private',created:t,updated:t,due:dv?new Date(dv+'T12:00').getTime():null,goal:'',members:[{name:'',me:true,role:'기획',perm:'소유자'}],cards,links,shelf:[],versions:[]};
-      db.projects.unshift(p);logAct(`‘${title}’ 프로젝트를 만들었어요`,p.id);closeModal();ui.sel=null;go('map',p.id);changed();
+      busy($('#np-btn'),true,'만드는 중…');
+      const {data,error}=await sb.from('projects').insert({title,type,due:dv?iso(new Date(dv+'T12:00')):null,data:{cards,links,shelf:[],versions:[],roles:{}}}).select().single();
+      if(error){busy($('#np-btn'),false);toast('프로젝트를 만들지 못했어요. 다시 시도해 주세요.');console.error(error);return}
+      const p=fromRow(data,[],{[me.id]:{name:db.profile.name,handle:db.profile.handle}});
+      db.projects.unshift(p);logAct(`‘${title}’ 프로젝트를 만들었어요`,p.id);closeModal();ui.sel=null;go('map',p.id);
     });
   });
 }
 function openLinkModal(){
   modal(`<h2>링크 추가</h2><form id="lkform" class="stack"><label class="field"><span>주소</span><input id="lk-url" type="url" required placeholder="https://"></label><label class="field"><span>제목<em>비워 두면 자동</em></span><input id="lk-title"></label><label class="field"><span>활용 메모<em>선택</em></span><textarea id="lk-memo" rows="2"></textarea></label><p class="small muted">YouTube·Figma·Google Drive·OneDrive 주소는 알맞은 카드로 표시돼요. 캔버스에 주소를 바로 붙여넣어도 돼요.</p><div class="mfoot"><button type="button" class="btn ghost" data-act="close">취소</button><button class="btn primary">추가</button></div></form>`,m=>{
-    m.querySelector('#lkform').addEventListener('submit',e=>{e.preventDefault();const u=$('#lk-url').value.trim(),t=$('#lk-title').value.trim(),me=$('#lk-memo').value.trim();closeModal();addLink(u,t,me)})});
+    m.querySelector('#lkform').addEventListener('submit',e=>{e.preventDefault();const u=$('#lk-url').value.trim(),t=$('#lk-title').value.trim(),me2=$('#lk-memo').value.trim();closeModal();addLink(u,t,me2)})});
 }
 function openShelf(){
-  const p=cur();
+  const p=cur(),r=ro(p);
   modal(`<h2>자료함</h2><p class="muted">캔버스에서만 지운 자료예요. 프로젝트 안에는 그대로 남아 있어서 다시 놓을 수 있어요.</p>
-  <ul class="vlist">${p.shelf.map(c=>`<li><div><b>${esc(c.title||'제목 없음')}</b><span class="muted">${kindLabel(c)} · ${fmtDate(c.created)}</span></div><div class="prow-acts"><button class="btn sm" data-act="unshelve" data-id="${c.id}">캔버스에 놓기</button><button class="btn sm danger" data-act="shelf-del" data-id="${c.id}">자료 삭제</button></div></li>`).join('')||'<li class="muted">자료함이 비어 있어요</li>'}</ul>
+  <ul class="vlist">${p.shelf.map(c=>`<li><div><b>${esc(c.title||'제목 없음')}</b><span class="muted">${kindLabel(c)} · ${fmtDate(c.created)}</span></div>${r?'':`<div class="prow-acts"><button class="btn sm" data-act="unshelve" data-id="${c.id}">캔버스에 놓기</button><button class="btn sm danger" data-act="shelf-del" data-id="${c.id}">자료 삭제</button></div>`}</li>`).join('')||'<li class="muted">자료함이 비어 있어요</li>'}</ul>
   <div class="mfoot"><button class="btn ghost" data-act="close">닫기</button></div>`);
 }
 function openVersions(){
-  const p=cur();
+  const p=cur(),r=ro(p);
   modal(`<h2>버전 기록</h2><p class="muted">자동저장과 별개예요. 이름을 붙인 저장 지점을 만들고, 확인한 뒤 이전 상태로 복구할 수 있어요.</p>
-  <form id="vform" class="inline"><input id="vname" required maxlength="40" placeholder="예: 2차 구성안 · 피드백 반영 전"><button class="btn primary">저장 지점 만들기</button></form>
-  <ul class="vlist">${p.versions.slice().reverse().map(v=>{const o=JSON.parse(v.snap);return `<li><div><b>${esc(v.name)}</b><span class="muted mono">${fmtDT(v.at)} · 카드 ${o.cards.length}장 · 연결 ${o.links.length}개</span></div><button class="btn sm" data-act="v-restore" data-id="${v.id}">이 버전으로 복구</button></li>`}).join('')||'<li class="muted">아직 저장 지점이 없어요</li>'}</ul>
+  ${r?'':`<form id="vform" class="inline"><input id="vname" required maxlength="40" placeholder="예: 2차 구성안 · 피드백 반영 전"><button class="btn primary">저장 지점 만들기</button></form>`}
+  <ul class="vlist">${p.versions.slice().reverse().map(v=>{const o=JSON.parse(v.snap);return `<li><div><b>${esc(v.name)}</b><span class="muted mono">${fmtDT(v.at)} · 카드 ${o.cards.length}장 · 연결 ${o.links.length}개</span></div>${r?'':`<button class="btn sm" data-act="v-restore" data-id="${v.id}">이 버전으로 복구</button>`}</li>`}).join('')||'<li class="muted">아직 저장 지점이 없어요</li>'}</ul>
   <div class="mfoot"><button class="btn ghost" data-act="close">닫기</button></div>`,m=>{
-    m.querySelector('#vform').addEventListener('submit',e=>{e.preventDefault();const n=$('#vname').value.trim();if(!n)return;p.versions.push({id:uid(),name:n,at:now(),snap:snap(p)});logAct(`‘${n}’ 저장 지점을 만들었어요`,p.id);changed();toast('저장 지점을 만들었어요');openVersions()})});
+    m.querySelector('#vform')?.addEventListener('submit',e=>{e.preventDefault();const n=$('#vname').value.trim();if(!n)return;p.versions.push({id:uid(),name:n,at:now(),snap:snap(p)});logAct(`‘${n}’ 저장 지점을 만들었어요`,p.id);changed();toast('저장 지점을 만들었어요');openVersions()})});
+}
+
+/* 참여자 */
+function openMembers(){
+  const p=cur(),own=p.role==='owner';
+  modal(`<h2>참여자</h2><p class="muted small">초대한 사람만 이 프로젝트를 볼 수 있어요. 초대받았다고 다른 프로젝트까지 보이지는 않아요. 참여해도 소유권은 넘어가지 않아요.</p>
+  <ul class="vlist">${p.members.map(m=>`<li><div><b>${esc(dispName(m))}${isMe(m)?' <span class="muted" style="font-weight:400">(나)</span>':''}</b>${memHandle(m)&&memName(m)?`<span class="muted">@${esc(memHandle(m))}</span>`:''}</div>${own&&m.perm!=='owner'?`<div class="prow-acts"><select data-perm="${m.userId}" aria-label="권한" style="width:auto"><option value="editor" ${m.perm==='editor'?'selected':''}>편집</option><option value="viewer" ${m.perm==='viewer'?'selected':''}>보기</option></select><button class="btn sm ghost" data-act="mem-remove" data-id="${m.userId}">내보내기</button></div>`:`<span class="chip">${PERM[m.perm]}</span>`}</li>`).join('')}</ul>
+  ${own?`<form id="invform" class="stack"><label class="field"><span>초대할 사람의 주소 아이디</span><input id="inv-handle" required placeholder="상대가 프로필에서 정한 아이디" autocomplete="off"></label><fieldset class="field"><legend>권한</legend><div class="choices"><label class="choice"><input type="radio" name="inv-perm" value="editor" checked><span>편집 · 작업 내용 수정</span></label><label class="choice"><input type="radio" name="inv-perm" value="viewer"><span>보기 · 열람만</span></label></div></fieldset><p class="formerr" id="inv-err" hidden></p><div class="mfoot"><button type="button" class="btn ghost" data-act="close">닫기</button><button class="btn primary" id="inv-btn">초대</button></div></form>`
+  :`${p.role!=='owner'?`<div class="mfoot"><button class="btn ghost danger" data-act="leave">프로젝트에서 나가기</button><button class="btn ghost" data-act="close">닫기</button></div>`:''}`}`,m=>{
+    m.querySelectorAll('[data-perm]').forEach(s=>s.addEventListener('change',async()=>{const u=s.dataset.perm;const {error}=await sb.from('project_members').update({perm:s.value}).eq('project_id',p.id).eq('user_id',u);if(error){toast('권한을 바꾸지 못했어요');return}p.members.find(x=>x.userId===u).perm=s.value;toast('권한을 바꿨어요')}));
+    m.querySelector('#invform')?.addEventListener('submit',async e=>{e.preventDefault();const er=$('#inv-err');er.hidden=true;
+      const h=$('#inv-handle').value.trim().replace(/^@/,'').toLowerCase();const perm=m.querySelector('[name=inv-perm]:checked').value;if(!h)return;
+      busy($('#inv-btn'),true);
+      const {data:pr}=await sb.from('profiles').select('id,name,handle').eq('handle',h).maybeSingle();
+      const fail=t=>{busy($('#inv-btn'),false);er.textContent=t;er.hidden=false};
+      if(!pr)return fail('그 아이디를 쓰는 사람이 없어요. 상대가 프로필에서 주소 아이디를 정했는지 확인해 주세요.');
+      if(pr.id===me.id)return fail('본인은 이미 소유자예요.');
+      if(p.members.some(x=>x.userId===pr.id))return fail('이미 참여 중인 사람이에요.');
+      const {error}=await sb.from('project_members').insert({project_id:p.id,user_id:pr.id,perm});
+      if(error)return fail('초대하지 못했어요. 다시 시도해 주세요.');
+      p.members.push({userId:pr.id,name:pr.name||'',handle:pr.handle||'',perm});
+      notify('action',`‘${p.title}’ 프로젝트에 ${PERM[perm]} 참여자로 초대됐어요`,p.id,null,pr.id);
+      logAct(`‘${p.title}’에 참여자를 초대했어요`,p.id);toast('초대했어요');openMembers();
+      const b=document.querySelector('[data-act="members"]');if(b)b.textContent=`참여자 ${p.members.length}`;
+    });
+  });
 }
 
 /* 완성 마법사 */
 let wiz=null;
 function openComplete(){
-  const p=cur();
-  const r=p.result||{};
-  wiz={step:1,url:r.url||'',goal:r.goal||p.goal||'',period:r.period||`${fmtDate(p.created)} – ${fmtDate(now())}`,tools:r.tools||'',members:JSON.parse(JSON.stringify(p.members||[{name:'',me:true,role:'',perm:'소유자'}])),pick:new Set(p.publicCards||p.cards.filter(c=>c.public&&c.kind!=='feedback').map(c=>c.id)),vis:p.visibility==='private'&&!p.completed?'public':p.visibility,home:p.inHome!==false};
+  const p=cur();const r=p.result||{};
+  wiz={step:1,url:r.url||'',goal:r.goal||p.goal||'',period:r.period||`${fmtDate(p.created)} – ${fmtDate(now())}`,tools:r.tools||'',roles:Object.assign({},p.roles||{}),pick:new Set(p.completed?p.publicCards:p.cards.filter(c=>c.public&&c.kind!=='feedback').map(c=>c.id)),vis:p.completed?p.visibility:'public',home:p.inHome!==false};
   wizStep();
 }
+function wizPage(){const p=cur();const pg=pageFromProject(p);pg.result={url:wiz.url,goal:wiz.goal,period:wiz.period,tools:wiz.tools};pg.cards=pageCards(Object.assign({},p,{publicCards:[...wiz.pick]}));pg.members=pageMembers(Object.assign({},p,{roles:wiz.roles}));return pg}
 function wizStep(){
   const p=cur(),w=wiz,s=w.step;
   const head=`<div class="eyebrow">프로젝트 완성 · ${s}/5</div><div class="steps">${[1,2,3,4,5].map(i=>`<i class="${i<=s?'on':''}"></i>`).join('')}</div>`;
   let body='';
-  if(s===1)body=`<h2>결과물과 프로젝트 정보</h2><label class="field"><span>최종 결과물 링크<em>YouTube 주소면 성과를 연결해요</em></span><input id="w-url" type="url" value="${esc(w.url)}" placeholder="https://youtube.com/watch?v=…"></label><label class="field"><span>목표</span><textarea id="w-goal" rows="2">${esc(w.goal)}</textarea></label><div class="row2"><label class="field"><span>기간</span><input id="w-period" value="${esc(w.period)}"></label><label class="field"><span>사용 도구</span><input id="w-tools" value="${esc(w.tools)}" placeholder="Premiere Pro, CapCut"></label></div>`;
-  if(s===2)body=`<h2>참여자와 표시할 역할</h2><p class="small muted">정식 기여 인증이나 자동 기여율 계산은 하지 않아요. 여기서 적은 역할이 그대로 표시돼요.</p><div class="memlist">${w.members.map((m,i)=>`<div class="memrow"><b>${esc(mname(m))}</b><input data-mi="${i}" value="${esc(m.role)}" placeholder="역할" aria-label="역할"><span class="chip">${esc(m.perm)}</span></div>`).join('')}</div>`;
-  if(s===3)body=`<h2>공개할 결과와 작업 과정</h2><p class="small muted">고른 카드만 공개 페이지에 들어가요. 고르지 않은 자료는 페이지를 만드는 과정에서도 노출되지 않아요.</p><div class="pick">${p.cards.map(c=>`<label><input type="checkbox" data-pk="${c.id}" ${w.pick.has(c.id)?'checked':''}><span class="chip kchip k-${c.kind}">${kindLabel(c)}</span><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.title||'제목 없음')}</span>${c.public?'':'<span class="chip st-warn" style="margin-left:auto">비공개 자료</span>'}</label>`).join('')||'<p class="muted">카드가 없어요.</p>'}</div>`;
-  if(s===4)body=`<h2>자동으로 구성된 페이지 미리보기</h2><p class="small muted">수정할 부분이 있으면 이전 단계로 돌아가세요.</p><div style="max-height:420px;overflow:auto;border-radius:14px">${pubHTML(p,wizResult(),[...w.pick])}</div>`;
+  if(s===1)body=`<h2>결과물과 프로젝트 정보</h2><label class="field"><span>최종 결과물 링크<em>YouTube 주소면 성과 연결 대상이 돼요</em></span><input id="w-url" type="url" value="${esc(w.url)}" placeholder="https://youtube.com/watch?v=…"></label><label class="field"><span>목표</span><textarea id="w-goal" rows="2">${esc(w.goal)}</textarea></label><div class="row2"><label class="field"><span>기간</span><input id="w-period" value="${esc(w.period)}"></label><label class="field"><span>사용 도구</span><input id="w-tools" value="${esc(w.tools)}" placeholder="Premiere Pro, CapCut"></label></div>`;
+  if(s===2)body=`<h2>참여자와 표시할 역할</h2><p class="small muted">정식 기여 인증이나 자동 기여율 계산은 하지 않아요. 여기서 적은 역할이 그대로 표시돼요.</p><div class="memlist">${p.members.map(m=>`<div class="memrow"><b>${esc(dispName(m))}</b><input data-mi="${m.userId}" value="${esc(w.roles[m.userId]||'')}" placeholder="역할 (예: 촬영)" aria-label="역할"><span class="chip">${PERM[m.perm]}</span></div>`).join('')}</div>`;
+  if(s===3)body=`<h2>공개할 결과와 작업 과정</h2><p class="small muted">고른 카드만 공개 페이지에 복사돼요. 고르지 않은 자료는 공개 페이지에 저장되지 않아요.</p><div class="pick">${p.cards.map(c=>`<label><input type="checkbox" data-pk="${c.id}" ${w.pick.has(c.id)?'checked':''}><span class="chip kchip k-${c.kind}">${kindLabel(c)}</span><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.title||'제목 없음')}</span>${c.public?'':'<span class="chip st-warn" style="margin-left:auto">비공개 자료</span>'}</label>`).join('')||'<p class="muted">카드가 없어요.</p>'}</div>`;
+  if(s===4)body=`<h2>자동으로 구성된 페이지 미리보기</h2><p class="small muted">수정할 부분이 있으면 이전 단계로 돌아가세요.</p><div style="max-height:420px;overflow:auto;border-radius:14px">${pubHTML(wizPage())}</div>`;
   if(s===5)body=`<h2>공개 여부</h2><div class="starts"><label class="start"><input type="radio" name="w-vis" value="public" ${w.vis==='public'?'checked':''}><span><b>공개</b><small>공개 주소로 누구나 볼 수 있어요</small></span></label><label class="start"><input type="radio" name="w-vis" value="private" ${w.vis!=='public'?'checked':''}><span><b>비공개</b><small>나와 초대한 참여자만 볼 수 있어요</small></span></label></div><label class="check"><input type="checkbox" id="w-home" ${w.home?'checked':''}><span>Creator Home에 연결<br><span class="small muted">공개로 선택한 경우에만 다른 사람에게 보여요.</span></span></label>${ownDone()>=3&&p.status!=='done'?'<p class="small" style="color:var(--warn);margin:0">무료 플랜 기준안(완성 3개)을 넘어요. 최종 한도는 아직 확정되지 않았어요.</p>':''}`;
-  modal(`${head}${body}<div class="mfoot"><button class="btn ghost" data-act="${s===1?'close':'w-prev'}">${s===1?'취소':'이전'}</button><button class="btn primary" data-act="${s===5?'w-finish':'w-next'}">${s===5?'완성하고 페이지 만들기':'다음'}</button></div>`,null,s===4);
+  modal(`${head}${body}<div class="mfoot"><button class="btn ghost" data-act="${s===1?'close':'w-prev'}">${s===1?'취소':'이전'}</button><button class="btn primary" data-act="${s===5?'w-finish':'w-next'}" id="w-main">${s===5?'완성하고 페이지 만들기':'다음'}</button></div>`,null,s===4);
 }
 function wizCollect(){
   const w=wiz,s=w.step;
   if(s===1){w.url=$('#w-url').value.trim();w.goal=$('#w-goal').value.trim();w.period=$('#w-period').value.trim();w.tools=$('#w-tools').value.trim()}
-  if(s===2)document.querySelectorAll('[data-mi]').forEach(el=>w.members[+el.dataset.mi].role=el.value.trim());
+  if(s===2)document.querySelectorAll('[data-mi]').forEach(el=>w.roles[el.dataset.mi]=el.value.trim());
   if(s===3){w.pick=new Set([...document.querySelectorAll('[data-pk]')].filter(el=>el.checked).map(el=>el.dataset.pk))}
   if(s===5){w.vis=document.querySelector('[name=w-vis]:checked').value;w.home=$('#w-home').checked}
 }
-const wizResult=()=>({url:wiz.url,goal:wiz.goal,period:wiz.period,tools:wiz.tools,members:wiz.members});
-function wizFinish(){
+async function wizFinish(){
   const p=cur(),w=wiz,first=p.status!=='done';
-  p.result=wizResult();p.members=w.members;p.publicCards=[...w.pick];p.visibility=w.vis;p.inHome=w.home;p.status='done';p.completed=now();
-  if(w.url&&classify(w.url)?.media==='youtube'){if(!p.metrics||p.metrics.status!=='ok')p.metrics={status:'pending'}}else if(!w.url)p.metrics=null;
+  busy($('#w-main'),true,'저장 중…');
+  p.result={url:w.url,goal:w.goal,period:w.period,tools:w.tools};p.roles=w.roles;p.publicCards=[...w.pick];p.visibility=w.vis;p.inHome=w.home;p.status='done';p.completed=now();
+  p.metrics=w.url&&classify(w.url)?.media==='youtube'?{status:'pending'}:null;
+  markDirty(p);await flush();
+  if(saveState==='failed'){busy($('#w-main'),false);return}
+  await syncPublicPage(p);
   if(first){logAct(`‘${p.title}’을(를) 완성했어요`,p.id);notify('general',`‘${p.title}’ 프로젝트를 완성했어요. ${w.vis==='public'?'공개 페이지가 만들어졌어요.':'비공개로 보관돼요.'}`,p.id)}
-  closeModal();wiz=null;changed();ui.sel=null;go('public',p.id);toast(w.vis==='public'?'공개 페이지를 만들었어요':'완성했어요 · 비공개');
+  closeModal();wiz=null;ui.sel=null;go('public',p.id);toast(w.vis==='public'?'공개 페이지를 만들었어요':'완성했어요 · 비공개');
 }
 
 /* ---------- 공개 페이지 ---------- */
@@ -857,45 +959,93 @@ function procCard(c){
   else if(c.media==='youtube')m=mediaHTML(c,false);
   return `<div class="proccard"><span class="chip kchip k-${c.kind}" style="justify-self:start">${kindLabel(c)}</span>${m}<h3>${esc(c.title||'')}</h3>${c.body?`<p>${esc(c.body)}</p>`:''}</div>`;
 }
-function pubHTML(p,r,ids){
-  const cs=ids.map(id=>p.cards.find(c=>c.id===id)).filter(Boolean);
-  const k=r.url?classify(r.url):null;
+function pubHTML(pg){
+  const r=pg.result||{};const k=r.url?classify(r.url):null;
+  const owner=(pg.members||[]).find(m=>m.owner)||{};
+  const by=[esc(owner.name||''),owner.handle?'@'+esc(owner.handle):''].filter(Boolean).join(' · ');
   return `<article class="pub">
-  <div class="pub-hero"><div class="eyebrow">${esc(p.type)}${r.period?' · '+esc(r.period):''}</div><h1>${esc(p.title)}</h1>${r.goal?`<p class="lede">${esc(r.goal)}</p>`:''}${byline()?`<div class="pub-by">${byline()}</div>`:''}</div>
+  <div class="pub-hero"><div class="eyebrow">${esc(pg.type)}${r.period?' · '+esc(r.period):''}</div><h1>${esc(pg.title)}</h1>${r.goal?`<p class="lede">${esc(r.goal)}</p>`:''}${by?`<div class="pub-by">${owner.handle?`<a href="${homeUrl(owner.handle)}" style="color:inherit">${by}</a>`:by}</div>`:''}</div>
   ${r.url?`<div class="pub-sec"><a class="pub-result" href="${esc(r.url)}" target="_blank" rel="noopener"><div class="yt"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg><span>${esc(k?.host||'')}</span></div><div><b>결과물 보기 ↗</b><small>${esc(r.url)}</small></div></a></div>`:''}
-  <div class="pub-sec"><h2>역할과 참여</h2><ul class="roles">${(r.members||[]).map(m=>`<li>${mname(m)?`<b>${esc(mname(m))}</b>`:''}<span>${esc(m.role||'참여')}</span></li>`).join('')}</ul>${r.tools?`<div class="chips">${r.tools.split(',').map(t=>t.trim()).filter(Boolean).map(t=>`<span class="chip">${esc(t)}</span>`).join('')}</div>`:''}</div>
-  <div class="pub-sec"><h2>작업 과정</h2>${cs.length?`<div class="procgrid">${cs.map(procCard).join('')}</div>`:'<p class="muted" style="margin:0">공개할 작업 과정을 고르지 않았어요.</p>'}</div>
+  <div class="pub-sec"><h2>역할과 참여</h2><ul class="roles">${(pg.members||[]).map(m=>`<li>${m.name?`<b>${esc(m.name)}</b>`:(m.handle?`<b>@${esc(m.handle)}</b>`:'')}<span>${esc(m.role||(m.owner?'소유자':'참여'))}</span></li>`).join('')}</ul>${r.tools?`<div class="chips">${r.tools.split(',').map(t=>t.trim()).filter(Boolean).map(t=>`<span class="chip">${esc(t)}</span>`).join('')}</div>`:''}</div>
+  <div class="pub-sec"><h2>작업 과정</h2>${(pg.cards||[]).length?`<div class="procgrid">${pg.cards.map(procCard).join('')}</div>`:'<p class="muted" style="margin:0">공개할 작업 과정을 고르지 않았어요.</p>'}</div>
   </article>`;
 }
+function urlBox(url,label){return `<div class="urlbox"><code>${esc(url)}</code><button class="btn sm" data-act="copy" data-text="${esc(url)}">${label}</button></div>`}
 function vPublic(p){
-  const own=p.role==='owner';
+  const own=p.role==='owner',live=shouldPublish(p);
   return `<div class="page">
-  <div class="pubbar"><button class="btn ghost sm" data-act="go" data-view="projects">← 프로젝트</button><span class="chip ${p.visibility==='public'?'st-ok':''}">${p.visibility==='public'?'공개 중':'비공개 · 나와 참여자만'}</span>${p.inHome&&p.visibility==='public'?'<span class="chip">Creator Home 연결됨</span>':''}<span style="flex:1"></span>${own?`<button class="btn sm" data-act="edit-public">공개 정보 수정</button><button class="btn sm" data-act="reopen" data-id="${p.id}">다시 작업 열기</button>`:`<button class="btn sm" data-act="peek-map" data-id="${p.id}">작업 공간 보기</button>`}</div>
-  ${p.visibility==='public'&&db.profile.handle?`<div class="urlbox"><code>ballacove.app/@${esc(db.profile.handle)}/${esc(p.id)}</code><button class="btn sm" data-act="copy" data-text="https://ballacove.app/@${esc(db.profile.handle)}/${esc(p.id)}">주소 복사</button></div>`:''}
-  ${pubHTML(p,Object.assign({members:p.members},p.result||{}),p.publicCards||[])}
-  ${own&&p.metrics?`<section class="panel"><div class="panelhead"><h2>성과</h2><span class="chip">예시 데이터</span></div>${perfBlock(p)}</section>`:''}
-  <p class="small muted" style="margin:0">이 페이지에 문제가 있나요? <button class="linkbtn" data-act="report">신고하기</button></p>
+  <div class="pubbar"><button class="btn ghost sm" data-act="go" data-view="projects">← 프로젝트</button><span class="chip ${live?'st-ok':''}">${live?'공개 중':'비공개 · 나와 참여자만'}</span>${live&&p.inHome?'<span class="chip">Creator Home 연결됨</span>':''}<span style="flex:1"></span>${own?`<button class="btn sm" data-act="edit-public">공개 정보 수정</button>${p.status==='done'?`<button class="btn sm" data-act="reopen" data-id="${p.id}">다시 작업 열기</button>`:''}`:''}<button class="btn sm" data-act="peek-map" data-id="${p.id}">작업 공간 보기</button></div>
+  ${live?urlBox(projUrl(p.id),'주소 복사'):''}
+  ${pubHTML(pageFromProject(p))}
+  ${own&&p.metrics?`<section class="panel"><div class="panelhead"><h2>성과</h2></div>${perfBlock(p)}</section>`:''}
   </div>`;
 }
 
-/* ---------- Creator Home ---------- */
+/* 로그인 없이 보는 공개 화면 */
+function guestBar(){return `<div class="guestbar"><a class="brand" href="${BASE}" style="text-decoration:none;color:var(--ink)">${LOGO}Ballacove</a><button class="btn sm ${me?'':'primary'}" data-act="to-app">${me?'내 작업 공간으로':'로그인 · 가입'}</button></div>`}
+function vGuestPage(){
+  const pg=ui.pub?.pg;
+  if(!pg)return `${guestBar()}<div class="page"><div class="panel empty"><h2>볼 수 없는 페이지예요</h2><p class="muted" style="margin:0">비공개로 바뀌었거나 삭제된 프로젝트예요.</p></div></div>`;
+  return `${guestBar()}<div class="page">${pubHTML(pg)}<p class="small muted" style="margin:0">이 페이지에 문제가 있나요? <button class="linkbtn" data-act="report" data-id="${pg.id}">신고하기</button></p></div>`;
+}
+function vGuestCreator(){
+  const c=ui.pub;
+  if(!c?.profile)return `${guestBar()}<div class="page"><div class="panel empty"><h2>찾을 수 없는 Creator Home이에요</h2><p class="muted" style="margin:0">주소 아이디가 바뀌었을 수 있어요.</p></div></div>`;
+  const pr=c.profile;
+  const grid=list=>`<div class="cgrid">${list.map(pg=>`<button class="ccard" data-act="pub-open" data-id="${pg.id}"><div class="cover">${coverOf(pg)}</div><div class="cb"><h3>${esc(pg.title)}</h3><div class="small muted">${esc(pg.type)}${pg.result?.period?' · '+esc(pg.result.period):''}</div><div class="small">${esc((pg.members||[]).find(m=>m.userId===pr.id)?.role||'')}</div></div></button>`).join('')}</div>`;
+  return `${guestBar()}<div class="page">
+  <section class="panel profile"><div class="avatar" aria-hidden="true">${esc((pr.name||'').slice(0,1))}</div><div style="display:grid;gap:4px;min-width:0"><div class="eyebrow">CREATOR HOME</div>${pr.name?`<h1>${esc(pr.name)}</h1>`:''}<div class="small muted">@${esc(pr.handle)}</div>${pr.intro?`<p style="margin:4px 0 0">${esc(pr.intro)}</p>`:''}<div class="chips">${(pr.fields||[]).map(f=>`<span class="chip">${esc(f)}</span>`).join('')}</div></div></section>
+  <section class="panel"><h2>완성한 프로젝트</h2>${c.own.length?grid(c.own):'<p class="muted" style="margin:0">아직 공개한 프로젝트가 없어요.</p>'}</section>
+  ${c.joined.length?`<section class="panel"><h2>참여한 프로젝트</h2>${grid(c.joined)}</section>`:''}
+  </div>`;
+}
+const pageFromRow=r=>({id:r.project_id,title:r.title,type:r.type,result:r.result,cards:r.cards||[],members:r.members||[],inHome:r.in_home});
+async function showPublicProject(id){
+  publicMode=true;ui.view='loading';render();
+  const {data}=await sb.from('public_pages').select('*').eq('project_id',id).maybeSingle();
+  ui.pub={pg:data?pageFromRow(data):null};ui.view='pubpage';render();
+  if(data)document.title=`${data.title} · Ballacove`;
+}
+async function showPublicCreator(h){
+  publicMode=true;ui.view='loading';render();
+  const {data:pr}=await sb.from('profiles').select('id,name,handle,intro,fields').eq('handle',h.toLowerCase()).maybeSingle();
+  let own=[],joined=[];
+  if(pr){
+    const [{data:a},{data:b}]=await Promise.all([
+      sb.from('public_pages').select('*').eq('owner_id',pr.id).eq('in_home',true).order('published_at',{ascending:false}),
+      sb.from('public_pages').select('*').contains('members',[{userId:pr.id}]).neq('owner_id',pr.id).order('published_at',{ascending:false})]);
+    own=(a||[]).map(pageFromRow);joined=(b||[]).map(pageFromRow);
+  }
+  ui.pub={profile:pr,own,joined};ui.view='pubcreator';render();
+}
+
+/* ---------- Creator Home (내 것) ---------- */
 function vCreator(){
   const pr=db.profile;
   const mine=db.projects.filter(p=>p.status==='done'&&p.role==='owner');
-  const pub=mine.filter(p=>p.visibility==='public'&&p.inHome);
-  const joined=db.projects.filter(p=>p.status==='done'&&p.role==='editor'&&p.visibility==='public');
-  const grid=list=>`<div class="cgrid">${list.map(p=>`<button class="ccard" data-act="open-project" data-id="${p.id}"><div class="cover">${coverOf(p)}</div><div class="cb"><h3>${esc(p.title)}</h3><div class="small muted">${esc(p.type)} · ${esc(p.result?.period||fmtDate(p.completed||p.updated))}</div><div class="small">${esc((p.members||[]).find(m=>m.me)?.role||'')}</div></div></button>`).join('')}</div>`;
+  const pub=mine.filter(p=>shouldPublish(p)&&p.inHome);
+  const joined=db.projects.filter(p=>p.status==='done'&&p.role!=='owner'&&p.visibility==='public');
+  const grid=list=>`<div class="cgrid">${list.map(p=>`<button class="ccard" data-act="open-project" data-id="${p.id}"><div class="cover">${coverOf(pageFromProject(p))}</div><div class="cb"><h3>${esc(p.title)}</h3><div class="small muted">${esc(p.type)} · ${esc(p.result?.period||fmtDate(p.completed||p.updated))}</div><div class="small">${esc((p.roles||{})[me.id]||'')}</div></div></button>`).join('')}</div>`;
   return `<div class="page">
-  <section class="panel profile"><div class="avatar" aria-hidden="true">${esc((pr.name||'').slice(0,1))}</div><div style="display:grid;gap:4px;min-width:0"><div class="eyebrow">CREATOR HOME</div>${pr.name?`<h1>${esc(pr.name)}</h1>`:'<h1 class="muted" style="font-weight:500">이름이 비어 있어요</h1>'}${pr.handle?`<div class="small muted">@${esc(pr.handle)}</div>`:''}<p style="margin:4px 0 0">${esc(pr.intro)}</p><div class="chips">${pr.fields.map(f=>`<span class="chip">${esc(f)}</span>`).join('')}</div></div><div class="pacts" style="display:grid;gap:8px;justify-items:start"><button class="btn sm" data-act="edit-profile">프로필 수정</button></div></section>
-  ${pr.handle?`<div class="urlbox"><code>ballacove.app/@${esc(pr.handle)}</code><button class="btn sm" data-act="copy" data-text="https://ballacove.app/@${esc(pr.handle)}">공개 주소 복사</button></div>`:'<p class="small muted" style="margin:0">프로필에서 주소 아이디를 정하면 공개 주소가 생겨요.</p>'}
+  <section class="panel profile"><div class="avatar" aria-hidden="true">${esc((pr.name||'').slice(0,1))}</div><div style="display:grid;gap:4px;min-width:0"><div class="eyebrow">CREATOR HOME</div>${pr.name?`<h1>${esc(pr.name)}</h1>`:'<h1 class="muted" style="font-weight:500">이름이 비어 있어요</h1>'}${pr.handle?`<div class="small muted">@${esc(pr.handle)}</div>`:''}${pr.intro?`<p style="margin:4px 0 0">${esc(pr.intro)}</p>`:''}<div class="chips">${pr.fields.map(f=>`<span class="chip">${esc(f)}</span>`).join('')}</div></div><div class="pacts" style="display:grid;gap:8px;justify-items:start"><button class="btn sm" data-act="edit-profile">프로필 수정</button></div></section>
+  ${pr.handle?urlBox(homeUrl(pr.handle),'공개 주소 복사'):'<p class="small muted" style="margin:0">프로필에서 주소 아이디를 정하면 공개 주소가 생기고, 다른 사람이 나를 프로젝트에 초대할 수 있어요.</p>'}
   <section class="panel"><div class="panelhead"><h2>완성한 프로젝트</h2><span class="small muted">${mine.length-pub.length?`비공개·미연결 ${mine.length-pub.length}개는 나에게만 보여요`:''}</span></div>${pub.length?grid(pub):'<p class="muted" style="margin:0">공개로 완성한 프로젝트가 여기에 모여요.</p>'}</section>
   <section class="panel"><h2>참여한 프로젝트</h2>${joined.length?grid(joined):'<p class="muted" style="margin:0">참여해서 완성된 공개 프로젝트가 여기에 보여요.</p>'}<p class="small muted" style="margin:0">참여했다고 소유권이 넘어오지는 않아요. 역할과 참여 기록만 표시돼요.</p></section>
   </div>`;
 }
 function openProfile(){
   const pr=db.profile;
-  modal(`<h2>프로필 수정</h2><form id="pfform" class="stack"><label class="field"><span>이름</span><input id="pf-name" value="${esc(pr.name)}"></label><label class="field"><span>주소 아이디</span><input id="pf-handle" pattern="[a-z0-9._]{3,30}" value="${esc(pr.handle)}"></label><label class="field"><span>소개</span><textarea id="pf-intro" rows="2">${esc(pr.intro)}</textarea></label><label class="field"><span>관심 분야<em>쉼표로 구분</em></span><input id="pf-fields" value="${esc(pr.fields.join(', '))}"></label><div class="mfoot"><button type="button" class="btn ghost" data-act="close">취소</button><button class="btn primary">저장</button></div></form>`,m=>{
-    m.querySelector('#pfform').addEventListener('submit',e=>{e.preventDefault();pr.name=$('#pf-name').value.trim();pr.handle=$('#pf-handle').value.trim();pr.intro=$('#pf-intro').value.trim();pr.fields=$('#pf-fields').value.split(',').map(s=>s.trim()).filter(Boolean);closeModal();changed();render();toast('프로필을 저장했어요')})});
+  modal(`<h2>프로필 수정</h2><form id="pfform" class="stack" novalidate><label class="field"><span>이름</span><input id="pf-name" maxlength="40" value="${esc(pr.name)}"></label><label class="field"><span>주소 아이디<em>영문 소문자·숫자·.·_ 3~30자</em></span><input id="pf-handle" maxlength="30" autocomplete="off" value="${esc(pr.handle)}"></label><label class="field"><span>소개</span><textarea id="pf-intro" rows="2" maxlength="200">${esc(pr.intro)}</textarea></label><label class="field"><span>관심 분야<em>쉼표로 구분</em></span><input id="pf-fields" value="${esc(pr.fields.join(', '))}"></label><p class="formerr" id="pf-err" hidden></p><div class="mfoot"><button type="button" class="btn ghost" data-act="close">취소</button><button class="btn primary" id="pf-btn">저장</button></div></form>`,m=>{
+    m.querySelector('#pfform').addEventListener('submit',async e=>{e.preventDefault();const er=$('#pf-err');er.hidden=true;
+      const name=$('#pf-name').value.trim(),handle=$('#pf-handle').value.trim().replace(/^@/,'').toLowerCase(),intro=$('#pf-intro').value.trim(),fields=$('#pf-fields').value.split(',').map(s=>s.trim()).filter(Boolean);
+      if(handle&&!/^[a-z0-9._]{3,30}$/.test(handle)){er.textContent='주소 아이디는 영문 소문자·숫자·마침표·밑줄로 3~30자예요.';er.hidden=false;return}
+      busy($('#pf-btn'),true);
+      const {error}=await sb.from('profiles').update({name,handle:handle||null,intro,fields}).eq('id',me.id);
+      busy($('#pf-btn'),false);
+      if(error){er.textContent=error.code==='23505'?'이미 다른 사람이 쓰는 아이디예요.':'저장하지 못했어요. 다시 시도해 주세요.';er.hidden=false;return}
+      Object.assign(pr,{name,handle,intro,fields});closeModal();render();toast('프로필을 저장했어요');
+      db.projects.filter(p=>p.role==='owner'&&shouldPublish(p)).forEach(p=>syncPublicPage(p));
+    })});
 }
 
 /* ---------- 알림함 ---------- */
@@ -909,22 +1059,41 @@ function vInbox(){
 }
 
 /* 신고 */
-function openReport(){
-  modal(`<h2>신고하기</h2><form id="rpform" class="stack"><label class="field"><span>사유</span><select id="rp-why"><option>도용·무단 사용</option><option>소유권 분쟁</option><option>괴롭힘·혐오 표현</option><option>스팸·광고</option><option>기타</option></select></label><label class="field"><span>설명</span><textarea id="rp-desc" rows="3" required placeholder="어떤 부분이 문제인지 적어 주세요"></textarea></label><label class="field"><span>근거 자료<em>스크린샷·파일</em></span><input type="file" id="rp-files" multiple></label><label class="field"><span>근거 링크<em>선택</em></span><input id="rp-link" type="url" placeholder="https://"></label><p class="small muted">접수하면 사건번호가 생기고, 접수됨 → 검토 중 → 처리 완료 순서로 알려 드려요. 결과에 대해 한 번 재검토를 요청할 수 있어요.</p><div class="mfoot"><button type="button" class="btn ghost" data-act="close">취소</button><button class="btn primary">신고 접수</button></div></form>`,m=>{
-    m.querySelector('#rpform').addEventListener('submit',e=>{e.preventDefault();const d=new Date();const no=`BC-${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}-${String(Math.floor(Math.random()*9000)+1000)}`;const files=$('#rp-files').files.length;
-      notify('general',`신고 ${no}가 접수됐어요. 검토가 시작되면 알려 드릴게요.`,null);changed();
-      modal(`<h2>신고가 접수됐어요</h2><p>사건번호 <b class="mono">${no}</b></p><div class="casesteps"><span class="on">접수됨</span><span>검토 중</span><span>처리 완료</span></div><p class="small muted">근거 자료 ${files}개${$('#rp-link')?.value?' · 링크 1개':''}가 함께 제출됐어요. 처리 결과에는 판단 이유를 함께 안내하고, 상대방 개인정보와 상세 제재 내용은 보호해요.</p><div class="mfoot"><button class="btn primary" data-act="close">확인</button></div>`)})});
+function openReport(pid){
+  if(!me){modal(`<h2>신고하려면 로그인이 필요해요</h2><p class="muted">로그인하면 접수 상태와 처리 결과를 알림으로 받을 수 있어요.</p><div class="mfoot"><button class="btn ghost" data-act="close">닫기</button><button class="btn primary" data-act="to-app">로그인 · 가입</button></div>`);return}
+  modal(`<h2>신고하기</h2><form id="rpform" class="stack"><label class="field"><span>사유</span><select id="rp-why"><option>도용·무단 사용</option><option>소유권 분쟁</option><option>괴롭힘·혐오 표현</option><option>스팸·광고</option><option>기타</option></select></label><label class="field"><span>설명</span><textarea id="rp-desc" rows="3" required placeholder="어떤 부분이 문제인지 적어 주세요"></textarea></label><label class="field"><span>근거 링크<em>스크린샷을 올린 주소나 원본 주소</em></span><input id="rp-link" type="url" placeholder="https://"></label><p class="small muted">접수하면 사건번호가 생기고, 접수됨 → 검토 중 → 처리 완료 순서로 알려 드려요. 결과에 대해 한 번 재검토를 요청할 수 있어요.</p><div class="mfoot"><button type="button" class="btn ghost" data-act="close">취소</button><button class="btn primary" id="rp-btn">신고 접수</button></div></form>`,m=>{
+    m.querySelector('#rpform').addEventListener('submit',async e=>{e.preventDefault();const d=new Date();const no=`BC-${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}-${String(Math.floor(Math.random()*90000)+10000)}`;
+      busy($('#rp-btn'),true);
+      const link=$('#rp-link').value.trim();
+      const {error}=await sb.from('reports').insert({case_no:no,project_id:pid||null,reason:$('#rp-why').value,description:$('#rp-desc').value.trim(),evidence_link:link||null,evidence_count:link?1:0});
+      if(error){busy($('#rp-btn'),false);toast('신고를 접수하지 못했어요. 다시 시도해 주세요.');return}
+      if(started)notify('general',`신고 ${no}가 접수됐어요. 검토가 시작되면 알려 드릴게요.`,null);
+      modal(`<h2>신고가 접수됐어요</h2><p>사건번호 <b class="mono">${no}</b></p><div class="casesteps"><span class="on">접수됨</span><span>검토 중</span><span>처리 완료</span></div><p class="small muted">처리 결과에는 판단 이유를 함께 안내하고, 상대방 개인정보와 상세 제재 내용은 보호해요.</p><div class="mfoot"><button class="btn primary" data-act="close">확인</button></div>`)})});
 }
 
 /* ---------- 라우팅 ---------- */
 function go(view,pid){ui.view=view;if(pid!==undefined)ui.pid=pid;if(view!=='map'){ui.linkFrom=null}render();$('#main').scrollTop=0}
 function render(){
-  paintChrome();const m=$('#main');const p=cur();
+  $('#app').classList.toggle('guest',!started||publicMode);
+  paintChrome();const m=$('#main');
+  if(ui.view==='auth'){m.innerHTML=vAuth();mountAuth();return}
+  if(ui.view==='loading'){m.innerHTML='<div class="loading"><span class="spin"></span><span>불러오는 중</span></div>';return}
+  if(ui.view==='error'){m.innerHTML=`<div class="authwrap"><div class="authcard"><h2>불러오지 못했어요</h2><p class="muted small" style="margin:0">${esc(ui.err||'인터넷 연결을 확인해 주세요.')}</p><div class="mfoot"><button class="btn ghost" data-act="logout">로그아웃</button><button class="btn primary" data-act="reload">다시 시도</button></div></div></div>`;return}
+  if(ui.view==='pubpage'){m.innerHTML=vGuestPage();return}
+  if(ui.view==='pubcreator'){m.innerHTML=vGuestCreator();return}
+  const p=cur();
   if(ui.view==='map'&&p){m.innerHTML=vMap(p);mountMap();return}
   if(ui.view==='public'&&p){m.innerHTML=vPublic(p);return}
   m.innerHTML=ui.view==='projects'?vProjects():ui.view==='creator'?vCreator():ui.view==='inbox'?vInbox():ui.view==='trash'?vTrash():vHome();
 }
 function openProject(id,cid){const p=proj(id);if(!p)return toast('이 프로젝트는 더 이상 열 수 없어요');ui.sel=cid||null;go(p.status==='done'?'public':'map',id)}
+async function start(){
+  if(started)return;
+  publicMode=false;ui.pub=null;ui.view='loading';render();
+  try{await loadAll();started=true;ui.view='home';render()}
+  catch(e){console.error(e);ui.view='error';ui.err='데이터를 불러오지 못했어요. 인터넷 연결을 확인한 뒤 다시 시도해 주세요.';render()}
+}
+function toApp(){history.replaceState(null,'',BASE);document.title='Ballacove';publicMode=false;ui.pub=null;closeModal();if(me)start();else{ui.view='auth';render()}}
 
 /* ---------- 동작 ---------- */
 document.addEventListener('click',e=>{
@@ -935,25 +1104,31 @@ document.addEventListener('click',e=>{
     case 'go':closeModal();go(t.dataset.view);break;
     case 'close':closeModal();break;
     case 'ok':{const f=pendingOk;closeModal();f&&f();break}
+    case 'auth-mode':ui.authMode=t.dataset.m;render();break;
+    case 'logout':flush().finally(()=>sb.auth.signOut());break;
+    case 'reload':started=false;start();break;
+    case 'to-app':toApp();break;
+    case 'pub-open':history.pushState(null,'',projUrl(id));showPublicProject(id);break;
     case 'new-project':openNewProject();break;
     case 'open-project':openProject(id);break;
     case 'tab':ui.tab=t.dataset.tab;render();break;
-    case 'archive':{const q=proj(id);q.status='archived';q.updated=now();changed();render();toast('보관했어요');break}
-    case 'unarchive':{const q=proj(id);if(ownActive()>=3)return toast('진행 중 3개를 넘어요. 하나를 정리한 뒤 다시 시도하세요.');q.status='active';q.updated=now();changed();render();break}
-    case 'del-project':{const q=proj(id);confirmBox('프로젝트를 삭제할까요?',`‘${esc(q.title)}’은(는) 휴지통으로 옮겨지고 30일 동안 복구할 수 있어요. 참여자의 작업·경력 기록은 유지돼요.`,'휴지통으로 이동',true,()=>{db.projects=db.projects.filter(x=>x.id!==id);q.deletedAt=now();db.trash.unshift(q);changed();render();toast('휴지통으로 옮겼어요')});break}
-    case 'restore':{const q=db.trash.find(x=>x.id===id);db.trash=db.trash.filter(x=>x.id!==id);delete q.deletedAt;if(q.status==='active'&&ownActive()>=3)q.status='archived';db.projects.unshift(q);changed();render();toast(q.status==='archived'?'복구했어요 · 진행 중이 가득 차서 보관함에 넣었어요':'복구했어요');break}
-    case 'purge':{const q=db.trash.find(x=>x.id===id);confirmBox('영구 삭제할까요?',`‘${esc(q.title)}’을(를) 영구 삭제하면 되돌릴 수 없어요.`,'영구 삭제',true,()=>{db.trash=db.trash.filter(x=>x.id!==id);changed();render()});break}
-    case 'reopen':{const q=proj(id);if(ownActive()>=3)return toast('진행 중 3개를 넘어요. 하나를 정리한 뒤 다시 시도하세요.');q.status='active';q.updated=now();notify('general',`‘${q.title}’ 작업을 다시 열었어요`,q.id);logAct(`‘${q.title}’ 작업을 다시 열었어요`,q.id);changed();ui.sel=null;go('map',q.id);break}
+    case 'archive':{const q=proj(id);q.status='archived';markDirty(q);syncPublicPage(q);render();toast('보관했어요');break}
+    case 'unarchive':{const q=proj(id);if(ownActive()>=3)return toast('진행 중 3개를 넘어요. 하나를 정리한 뒤 다시 시도하세요.');q.status=q.completed?'done':'active';markDirty(q);syncPublicPage(q);render();break}
+    case 'del-project':{const q=proj(id);confirmBox('프로젝트를 삭제할까요?',`‘${esc(q.title)}’은(는) 휴지통으로 옮겨지고 30일 동안 복구할 수 있어요.`,'휴지통으로 이동',true,()=>{db.projects=db.projects.filter(x=>x.id!==id);q.deletedAt=now();db.trash.unshift(q);markDirty(q);syncPublicPage(q);render();toast('휴지통으로 옮겼어요')});break}
+    case 'restore':{const q=db.trash.find(x=>x.id===id);db.trash=db.trash.filter(x=>x.id!==id);q.deletedAt=null;if(q.status==='active'&&ownActive()>=3)q.status='archived';db.projects.unshift(q);markDirty(q);syncPublicPage(q);render();toast(q.status==='archived'?'복구했어요 · 진행 중이 가득 차서 보관함에 넣었어요':'복구했어요');break}
+    case 'purge':{const q=db.trash.find(x=>x.id===id);confirmBox('영구 삭제할까요?',`‘${esc(q.title)}’을(를) 영구 삭제하면 되돌릴 수 없어요.`,'영구 삭제',true,async()=>{const {error}=await sb.from('projects').delete().eq('id',id);if(error)return toast('삭제하지 못했어요');db.trash=db.trash.filter(x=>x.id!==id);render()});break}
+    case 'reopen':{const q=proj(id);if(ownActive()>=3)return toast('진행 중 3개를 넘어요. 하나를 정리한 뒤 다시 시도하세요.');q.status='active';markDirty(q);notify('general',`‘${q.title}’ 작업을 다시 열었어요`,q.id);logAct(`‘${q.title}’ 작업을 다시 열었어요`,q.id);ui.sel=null;go('map',q.id);break}
     case 'peek-map':ui.sel=null;go('map',id);break;
     case 'edit-public':openComplete();break;
-    case 'reconnect':{const q=proj(id);q.metrics={status:'ok',views:3420,likes:188,comments:21,checked:now()};db.notifications.forEach(n=>{if(n.pid===id&&n.kind==='alert')n.read=true});changed();render();toast('YouTube를 다시 연결했어요 (예시)');break}
-    case 'copy':{const txt=t.dataset.text;const done=()=>toast('주소를 복사했어요');try{navigator.clipboard.writeText(txt).then(done,()=>{selectCode(t)})}catch(err){selectCode(t)}break}
+    case 'copy':{const txt=t.dataset.text;const done=()=>toast('주소를 복사했어요');try{navigator.clipboard.writeText(txt).then(done,()=>selectCode(t))}catch(err){selectCode(t)}break}
     case 'edit-profile':openProfile();break;
-    case 'report':openReport();break;
-    case 'notif':{const n=db.notifications.find(x=>x.id===id);n.read=true;changed();if(n.pid&&proj(n.pid))openProject(n.pid,n.cid);else render();break}
-    case 'readall':db.notifications.forEach(n=>n.read=true);changed();render();break;
-    case 'reset':confirmBox('예시 데이터로 초기화할까요?','이 브라우저에 저장된 프로토타입 작업이 모두 예시 데이터로 바뀌어요.','초기화',true,()=>{db=seed();Object.keys(hist).forEach(k=>delete hist[k]);ui.view='home';ui.pid=null;ui.sel=null;persist();render()});break;
-    case 'save-retry':persist();break;
+    case 'report':openReport(id);break;
+    case 'notif':{const n=db.notifications.find(x=>x.id===id);if(!n.read){n.read=true;sb.from('notifications').update({read:true}).eq('id',id).then(()=>{});paintChrome()}if(n.pid&&proj(n.pid))openProject(n.pid,n.cid);else render();break}
+    case 'readall':db.notifications.forEach(n=>n.read=true);sb.from('notifications').update({read:true}).eq('user_id',me.id).eq('read',false).then(()=>{});render();break;
+    case 'save-retry':p&&dirty.add(p.id);flush();break;
+    case 'members':openMembers();break;
+    case 'mem-remove':{const m=p.members.find(x=>x.userId===id);confirmBox('참여자를 내보낼까요?',`${esc(dispName(m))}님은 이 프로젝트를 더 이상 볼 수 없게 돼요. 완성 페이지에 표시된 역할 기록은 그대로 남아요.`,'내보내기',true,async()=>{const {error}=await sb.from('project_members').delete().eq('project_id',p.id).eq('user_id',id);if(error)return toast('내보내지 못했어요');p.members=p.members.filter(x=>x.userId!==id);toast('내보냈어요');openMembers();const b=document.querySelector('[data-act="members"]');if(b)b.textContent=`참여자 ${p.members.length}`});break}
+    case 'leave':confirmBox('프로젝트에서 나갈까요?','나가면 이 프로젝트를 더 이상 볼 수 없어요. 다시 참여하려면 소유자가 초대해야 해요.','나가기',true,async()=>{const {error}=await sb.from('project_members').delete().eq('project_id',p.id).eq('user_id',me.id);if(error)return toast('나가지 못했어요');db.projects=db.projects.filter(x=>x.id!==p.id);go('projects');toast('프로젝트에서 나갔어요')});break;
     // 맵
     case 'undo':undo();break;case 'redo':redo();break;
     case 'versions':openVersions();break;
@@ -982,7 +1157,7 @@ document.addEventListener('click',e=>{
 });
 function selectCode(btn){const code=btn.parentElement.querySelector('code');if(!code)return;const r=document.createRange();r.selectNodeContents(code);const s=getSelection();s.removeAllRanges();s.addRange(r);toast('주소를 선택했어요. 복사해서 쓰세요.')}
 function delMaterial(id,fromShelf){
-  const p=cur();const c=(fromShelf?p.shelf:p.cards).find(x=>x.id===id);if(!c)return;
+  const p=cur();if(ro(p))return;const c=(fromShelf?p.shelf:p.cards).find(x=>x.id===id);if(!c)return;
   const linked=p.links.filter(l=>l.includes(id)).map(l=>l[0]===id?l[1]:l[0]).map(x=>p.cards.find(k=>k.id===x)).filter(Boolean);
   const scenes=linked.filter(x=>x.kind==='scene').length;
   const msg=linked.length?`이 자료는 ${scenes?`장면 ${scenes}개를 포함해 `:''}카드 ${linked.length}개와 연결돼 있어요. 삭제하면 연결도 함께 사라져요.`:'프로젝트에서 이 자료를 삭제해요. 되돌리기로 복구할 수 있어요.';
@@ -997,14 +1172,31 @@ document.addEventListener('keydown',e=>{
   if((e.key==='Delete'||e.key==='Backspace')&&!typing&&ui.sel){e.preventDefault();delMaterial(ui.sel,false)}
 });
 document.addEventListener('paste',e=>{
-  if(ui.view!=='map'||!$('#modal').hidden||e.target.closest('input,textarea'))return;
+  if(ui.view!=='map'||!$('#modal').hidden||e.target.closest('input,textarea')||ro(cur()))return;
   const fs=[...(e.clipboardData?.files||[])];if(fs.length){e.preventDefault();addFiles(fs);return}
   const txt=(e.clipboardData?.getData('text')||'').trim();if(!txt)return;e.preventDefault();
   if(/^https?:\/\/\S+$/.test(txt))addLink(txt);else addCard('memo',{title:txt.slice(0,40),body:txt.length>40?txt:''},{noFocus:true});
 });
 window.addEventListener('resize',()=>{if(ui.view==='map')drawWires()});
+window.addEventListener('popstate',()=>{const qs=new URLSearchParams(location.search);if(qs.get('p'))showPublicProject(qs.get('p'));else if(qs.get('u'))showPublicCreator(qs.get('u'));else toApp()});
 
-render();
+/* ---------- 시작 ---------- */
+(async function boot(){
+  const qs=new URLSearchParams(location.search);
+  const {data:{session}}=await sb.auth.getSession();
+  me=session?.user||null;
+  sb.auth.onAuthStateChange((event,s)=>{
+    const u=s?.user||null;
+    if(event==='PASSWORD_RECOVERY')setTimeout(openNewPassword,400);
+    if(u&&(!me||me.id!==u.id)){me=u;if(!publicMode)setTimeout(start,0);else render()}
+    else if(!u&&me){me=null;started=false;db=emptyDb();Object.keys(hist).forEach(k=>delete hist[k]);ui.authMode='login';if(!publicMode){ui.view='auth'}render()}
+    else if(u)me=u;
+  });
+  if(qs.get('p'))return showPublicProject(qs.get('p'));
+  if(qs.get('u'))return showPublicCreator(qs.get('u'));
+  if(me)await start();else{ui.view='auth';render()}
+})();
+
 </script>
 </body>
 </html>
