@@ -368,10 +368,15 @@ input[type=file]{font-size:13px;max-width:100%}
 .pc-ink{stroke:var(--pen-ink)}.pc-red{stroke:var(--pen-red)}.pc-blue{stroke:var(--pen-blue)}.pc-green{stroke:var(--pen-green)}
 
 #sections{position:absolute;left:0;top:0}
-.section{position:absolute;border:1.5px solid color-mix(in srgb,var(--accent) 35%,var(--line));background:color-mix(in srgb,var(--accent) 5%,transparent);border-radius:16px}
-.section.sel{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 30%,transparent)}
-.sec-tab{position:absolute;left:0;bottom:100%;margin-bottom:6px;display:inline-flex;align-items:center;gap:8px;padding:4px 10px;border-radius:8px;background:var(--surface);border:1px solid var(--line);font-weight:600;font-size:13px;white-space:nowrap;cursor:move;user-select:none;-webkit-user-select:none;max-width:480px}
-.sec-name{overflow:hidden;text-overflow:ellipsis}
+.section{position:absolute;border:1.5px solid color-mix(in srgb,var(--accent) 35%,var(--line));background:color-mix(in srgb,var(--accent) 5%,transparent);border-radius:0 0 16px 16px}
+.section.sel,.section.sel .sec-tab{border-color:var(--accent)}
+.section.sel{box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 30%,transparent)}
+.sec-tab{position:absolute;left:-1.5px;right:-1.5px;bottom:100%;height:38px;display:flex;align-items:center;gap:10px;padding:0 10px 0 14px;border:1.5px solid color-mix(in srgb,var(--accent) 35%,var(--line));border-bottom:0;border-radius:14px 14px 0 0;background:color-mix(in srgb,var(--accent) 16%,var(--surface));font-weight:700;font-size:14px;white-space:nowrap;cursor:grab;user-select:none;-webkit-user-select:none;min-width:0}
+.sec-tab:hover{background:color-mix(in srgb,var(--accent) 24%,var(--surface))}
+.stage.panning .sec-tab,.sec-tab:active{cursor:grabbing}
+.stage:not([data-tool="select"]) .sec-tab{cursor:inherit}
+.sec-grip{width:16px;height:16px;margin-left:auto;flex:none;fill:var(--muted)}
+.sec-name{overflow:hidden;text-overflow:ellipsis;min-width:0}
 .sec-in{font:inherit;border:0!important;background:transparent!important;padding:0!important;width:220px;outline:none;color:inherit}
 .sec-busy{font-weight:400;color:var(--muted);display:inline-flex;gap:6px;align-items:center;font-size:12px}
 .sec-resize{position:absolute;right:-7px;bottom:-7px;width:14px;height:14px;border-radius:4px;background:var(--surface);border:2px solid var(--accent);cursor:nwse-resize;display:none}
@@ -809,7 +814,7 @@ function cardHTML(c){
   const right=c.media==='frame'?`<span class="due mono">${tc(c.t||0)}</span>`:c.due?`<span class="due${over?' over':''}">${dDay(c.due)}</span>`:'';
   return `<article class="card k-${c.kind}${extra}${cls}" data-id="${c.id}" style="${pos}"><div class="cardhead"><span class="chip kchip">${kindLabel(c)}</span>${right}</div>${mediaHTML(c,false)}<h3>${esc(c.title||'제목 없음')}</h3>${c.body?`<p>${esc(c.body)}</p>`:''}${c.who?`<div class="who">담당 ${esc(c.who)}</div>`:''}</article>`;
 }
-function secHTML(s,r){return `<div class="section${S.x.has(s.id)?' sel':''}" data-sid="${s.id}" style="left:${s.x}px;top:${s.y}px;width:${s.w}px;height:${s.h}px"><div class="sec-tab" data-sid="${s.id}"><span class="sec-name">${esc(s.title||'섹션')}</span>${s.busy?`<span class="sec-busy"><span class="spin"></span>${esc(s.busy)}</span>`:''}</div>${r?'':`<div class="sec-resize" data-sid="${s.id}" title="크기 조절"></div>`}</div>`}
+function secHTML(s,r){return `<div class="section${S.x.has(s.id)?' sel':''}" data-sid="${s.id}" style="left:${s.x}px;top:${s.y}px;width:${s.w}px;height:${s.h}px"><div class="sec-tab" data-sid="${s.id}" title="잡고 끌어서 섹션 옮기기 · 두 번 눌러 이름 바꾸기"><span class="sec-name">${esc(s.title||'섹션')}</span>${s.busy?`<span class="sec-busy"><span class="spin"></span>${esc(s.busy)}</span>`:''}<svg class="sec-grip" viewBox="0 0 16 16" aria-hidden="true"><circle cx="5" cy="4" r="1.3"/><circle cx="11" cy="4" r="1.3"/><circle cx="5" cy="8" r="1.3"/><circle cx="11" cy="8" r="1.3"/><circle cx="5" cy="12" r="1.3"/><circle cx="11" cy="12" r="1.3"/></svg></div>${r?'':`<div class="sec-resize" data-sid="${s.id}" title="크기 조절"></div>`}</div>`}
 function renderSections(){const p=cur(),el=$('#sections');if(!el||!p)return;el.innerHTML=p.sections.slice().sort((a,b)=>b.w*b.h-a.w*a.h).map(s=>secHTML(s,ro(p))).join('')}
 function updateSectionEl(s){const el=document.querySelector(`.section[data-sid="${s.id}"]`);if(el)el.outerHTML=secHTML(s,ro(cur()))}
 function paintHint(){const p=cur(),h=$('#hint');if(h&&p)h.hidden=!!(p.cards.length||p.sections.length||p.strokes.length)||hintClosed.has(p.id)}
@@ -898,7 +903,7 @@ function applyView(){const v=V(),st=$('#stage');if(!st)return;$('#world').style.
 function zoomAt(mx,my,f){const v=V();const nz=clamp(v.z*f,.2,2.5);const k=nz/v.z;v.x=mx-(mx-v.x)*k;v.y=my-(my-v.y)*k;v.z=nz;applyView()}
 function fit(){
   const p=cur(),st=$('#stage');if(!st)return;
-  const R=[...p.cards.map(cbox),...p.sections.map(s=>({x:s.x,y:s.y-36,w:s.w,h:s.h+36})),...p.strokes.map(kbox)];
+  const R=[...p.cards.map(cbox),...p.sections.map(s=>({x:s.x,y:s.y-40,w:s.w,h:s.h+40})),...p.strokes.map(kbox)];
   if(!R.length){views[ui.pid]={x:40,y:40,z:1};applyView();return}
   const x0=Math.min(...R.map(r=>r.x)),y0=Math.min(...R.map(r=>r.y)),x1=Math.max(...R.map(r=>r.x+r.w)),y1=Math.max(...R.map(r=>r.y+r.h));
   const W=st.clientWidth,H=st.clientHeight-80;
@@ -1026,8 +1031,8 @@ function finishEdit(){
 }
 function renameSection(sid){
   const s=secOf(sid),tab=document.querySelector(`.sec-tab[data-sid="${sid}"]`);if(!s||!tab||ro(cur()))return;
-  tab.innerHTML=`<input class="sec-in" value="${esc(s.title||'')}" maxlength="40" aria-label="섹션 이름">`;
-  const inp=tab.querySelector('input');inp.focus();inp.select();
+  const nm=tab.querySelector('.sec-name');nm.innerHTML=`<input class="sec-in" value="${esc(s.title||'')}" maxlength="40" aria-label="섹션 이름">`;
+  const inp=nm.querySelector('input');inp.focus();inp.select();
   inp.addEventListener('keydown',ev=>{ev.stopPropagation();if(ev.key==='Enter')inp.blur();if(ev.key==='Escape'){inp.dataset.cancel='1';inp.blur()}});
   inp.addEventListener('blur',()=>{const v=inp.value.trim()||'섹션';if(!inp.dataset.cancel&&v!==s.title){checkpoint();s.title=v;changed()}updateSectionEl(s)});
 }
@@ -1145,7 +1150,7 @@ async function extractToNodes(p,f,meta,n,anchor){
   let sx,sy;
   if(anchor){sx=anchor.x-secW/2;sy=anchor.y-secH/2}
   else{const R=[...p.cards.map(cbox),...p.sections.map(o=>({x:o.x,y:o.y,w:o.w,h:o.h})),...p.strokes.map(kbox)];
-    if(R.length){sx=Math.min(...R.map(r=>r.x));sy=Math.max(...R.map(r=>r.y+r.h))+90}else{const c=centerPt();sx=c.x-secW/2;sy=c.y-secH/2}}
+    if(R.length){sx=Math.min(...R.map(r=>r.x));sy=Math.max(...R.map(r=>r.y+r.h))+110}else{const c=centerPt();sx=c.x-secW/2;sy=c.y-secH/2}}
   const sec={id:uid(),x:Math.round(sx),y:Math.round(sy),w:secW,h:secH,title:baseName(f.name),busy:`장면 추출 중 0/${n}`};
   p.sections.push(sec);
   const open=()=>ui.view==='map'&&ui.pid===p.id;
@@ -1317,9 +1322,10 @@ function mountMap(){
   st.addEventListener('wheel',e=>{e.preventDefault();const rc=st.getBoundingClientRect();if(e.ctrlKey||e.metaKey||Math.abs(e.deltaY)>Math.abs(e.deltaX)&&!e.shiftKey&&e.deltaMode===0&&Math.abs(e.deltaY)>=40){zoomAt(e.clientX-rc.left,e.clientY-rc.top,Math.exp(-e.deltaY*.0018))}else{const v=V();v.x-=e.deltaX;v.y-=e.deltaY;applyView()}},{passive:false});
   if(r)return;
   st.addEventListener('dblclick',e=>{
-    if(e.target.closest(UI_SEL))return;
-    const tab=e.target.closest('.sec-tab');if(tab){renameSection(tab.dataset.sid);return}
-    const ce=e.target.closest('.card');if(ce){startEdit(ce.dataset.id);return}
+    const tg=document.elementFromPoint(e.clientX,e.clientY)||e.target;
+    if(tg.closest(UI_SEL))return;
+    const tab=tg.closest('.sec-tab');if(tab){renameSection(tab.dataset.sid);return}
+    const ce=tg.closest('.card');if(ce){startEdit(ce.dataset.id);return}
     const w=toWorld(e.clientX,e.clientY);
     if(tool.cur!=='select'||hitStroke(w,6/V().z)||hitLink(w,8/V().z))return;
     addCard('idea',{at:w},{exact:true});
