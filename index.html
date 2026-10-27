@@ -769,7 +769,7 @@ function vMap(p){
     <div class="stage" id="stage" data-tool="${tool.cur}">
       <div class="world" id="world"><div id="sections"></div><svg class="wires" id="wires"></svg><div id="cards"></div><svg class="ink" id="ink"></svg></div>
       <div class="marquee" id="marquee" hidden></div>
-      <div class="hint" id="hint" hidden><div>${r?'<b>아직 비어 있어요</b>편집 참여자가 내용을 추가하면 여기에 보여요.':'<b>여기서 시작해 보세요</b>아래 도구 막대에서 포스트잇·텍스트·펜을 고르거나, 이미지·영상·음악 파일을 끌어다 놓으세요.<span class="small">빈 곳을 두 번 누르면 아이디어 카드가 생겨요.</span><button class="btn sm" data-act="hint-close" style="justify-self:center;margin-top:6px">닫기</button>'}</div></div>
+      <div class="hint" id="hint" hidden><div>${r?'<b>아직 비어 있어요</b>편집 참여자가 내용을 추가하면 여기에 보여요.':'<b>여기서 시작해 보세요</b>아래 도구 막대에서 포스트잇·텍스트·펜을 고르거나, 이미지·영상·음악 파일을 끌어다 놓으세요.<span class="small">아이디어·도입부·장면 카드는 도구 막대의 카드 버튼에 있어요.</span><button class="btn sm" data-act="hint-close" style="justify-self:center;margin-top:6px">닫기</button>'}</div></div>
       <div class="linkbanner" id="connbanner" hidden></div>
       <div class="selbar" id="selbar" hidden></div>
       <div class="linkpop" id="linkpop" hidden></div>
@@ -1326,9 +1326,6 @@ function mountMap(){
     if(tg.closest(UI_SEL))return;
     const tab=tg.closest('.sec-tab');if(tab){renameSection(tab.dataset.sid);return}
     const ce=tg.closest('.card');if(ce){startEdit(ce.dataset.id);return}
-    const w=toWorld(e.clientX,e.clientY);
-    if(tool.cur!=='select'||hitStroke(w,6/V().z)||hitLink(w,8/V().z))return;
-    addCard('idea',{at:w},{exact:true});
   });
   st.addEventListener('dragover',e=>{if([...e.dataTransfer.types].includes('Files')){e.preventDefault();st.classList.add('dropping')}});
   st.addEventListener('dragleave',()=>st.classList.remove('dropping'));
