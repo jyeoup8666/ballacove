@@ -9,6 +9,13 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gothic+A1:wght@500;700;800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.js"></script>
 <style>
+/* 기본 리셋: 단독 실행 시에도 hidden 속성이 항상 숨김으로 동작하도록 */
+[hidden]{display:none!important}
+:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0}
+img{max-width:100%}
+.hint .btn{pointer-events:auto}
+
 /* 레이아웃: 왼쪽 내비 + 작업 영역. Cove Map은 점 격자 캔버스 위에 카드와 연결선. 강조색은 만(cove)의 깊은 청록 하나, 카드 종류색은 의미 표시용. */
 :root{
   --bg:#EDF1F0; --surface:#FBFCFC; --sunk:#E2E8E7; --ink:#14201E; --muted:#56635F; --line:#CBD5D3; --dot:#BFCAC8;
@@ -365,8 +372,10 @@ const emptyDb=()=>({profile:{name:'',handle:'',intro:'',fields:[]},projects:[],t
 let db=emptyDb();
 const ui={view:'loading',pid:null,tab:'active',sel:null,linkFrom:null,pub:null,authMode:'login',err:''};
 const hist={};
-const cur=()=>db.projects.find(p=>p.id===ui.pid);
-const proj=id=>db.projects.find(p=>p.id===id);
+let demo=null;
+const hintClosed=new Set();
+const cur=()=>ui.pid==='demo'?demo:db.projects.find(p=>p.id===ui.pid);
+const proj=id=>id==='demo'?demo:db.projects.find(p=>p.id===id);
 const anyProj=id=>db.projects.find(p=>p.id===id)||db.trash.find(p=>p.id===id);
 const ownActive=()=>db.projects.filter(p=>p.status==='active'&&p.role==='owner').length;
 const ownDone=()=>db.projects.filter(p=>p.status==='done'&&p.role==='owner').length;
@@ -421,7 +430,7 @@ async function loadAll(){
 /* ---------- 저장 ---------- */
 const dirty=new Set();
 let saveState='saved',saveTimer=null,lastSaved=now(),saving=false;
-function markDirty(p){if(!p||p.role==='viewer')return;p.updated=now();dirty.add(p.id);saveState='saving';paintSave();clearTimeout(saveTimer);saveTimer=setTimeout(flush,900)}
+function markDirty(p){if(!p||p.demo||p.role==='viewer')return;p.updated=now();dirty.add(p.id);saveState='saving';paintSave();clearTimeout(saveTimer);saveTimer=setTimeout(flush,900)}
 function changed(){markDirty(cur())}
 async function flush(){
   clearTimeout(saveTimer);
@@ -441,11 +450,11 @@ function paintSave(){const el=$('#savestate');if(!el)return;el.className='savest
 
 async function notify(kind,text,pid,cid,userId){
   const target=userId||me.id;
-  const {data,error}=await sb.from('notifications').insert({user_id:target,kind,text,project_id:pid||null,card_id:cid||null}).select().single();
+  const {data,error}=await sb.from('notifications').insert({user_id:target,kind,text,project_id:pid&&pid!=='demo'?pid:null,card_id:cid||null}).select().single();
   if(error){console.error(error);return}
   if(target===me.id){db.notifications.unshift({id:data.id,kind,text,pid,cid,at:ts(data.created_at),read:false});paintChrome();if(ui.view==='inbox')render()}
 }
-function logAct(text,pid){db.activity.unshift({at:now(),text,pid});db.activity=db.activity.slice(0,30);sb.from('activity').insert({text,project_id:pid||null}).then(({error})=>error&&console.error(error))}
+function logAct(text,pid){if(pid==='demo')return;db.activity.unshift({at:now(),text,pid});db.activity=db.activity.slice(0,30);sb.from('activity').insert({text,project_id:pid||null}).then(({error})=>error&&console.error(error))}
 
 /* 공개 페이지: 고른 카드만 따로 복사해 둔다. 비공개 자료는 이 표에 들어가지 않는다. */
 const pubResult=p=>{const r=p.result||{};return {url:r.url||'',goal:r.goal||'',period:r.period||'',tools:r.tools||''}};
@@ -561,7 +570,7 @@ function vHome(){
       <div><button class="btn primary" data-act="open-project" data-id="${last.id}">Cove Map 열기</button></div>
     </div>
     <button data-act="open-project" data-id="${last.id}" style="border:0;background:none;padding:0;cursor:pointer" aria-label="${esc(last.title)} 캔버스 열기">${miniMap(last,300,170)}</button>
-  </section>`:`<section class="panel empty"><h2>첫 프로젝트를 만들어 보세요</h2><p class="muted" style="margin:0">아이디어 한 줄, 이미지 한 장, 링크 하나면 시작할 수 있어요.</p><button class="btn primary" data-act="new-project">새 프로젝트 만들기</button></section>`}
+  </section>`:`<section class="panel empty"><h2>첫 프로젝트를 만들어 보세요</h2><p class="muted" style="margin:0">아이디어 한 줄, 이미지 한 장, 링크 하나면 시작할 수 있어요.</p><div class="chips"><button class="btn primary" data-act="new-project">새 프로젝트 만들기</button><button class="btn" data-act="demo-open">예시 프로젝트 둘러보기</button></div></section>`}
   <div class="grid2">
     <section class="panel"><h2>일정·진행 상황</h2><div class="rows">${act.map(p=>`<div class="row"><div class="grow"><button class="t" data-act="open-project" data-id="${p.id}">${esc(p.title)}</button><div class="small muted">${progressText(p)}${p.role!=='owner'?' · 참여':''}</div><div class="bar"><i style="width:${progressPct(p)}%"></i></div></div>${p.due?`<span class="chip mono ${sod(p.due)-sod(now())<=DAY?'st-warn':''}">${dDay(p.due)}</span>`:''}</div>`).join('')||'<p class="muted" style="margin:0">진행 중인 프로젝트가 없어요.</p>'}</div></section>
     <section class="panel"><h2>최근 활동</h2><div class="rows">${db.activity.slice(0,6).map(a=>`<div class="row act"><div class="grow">${esc(a.text)}</div><time>${rel(a.at)}</time></div>`).join('')||'<p class="muted" style="margin:0">아직 활동이 없어요.</p>'}</div></section>
@@ -582,7 +591,7 @@ function vProjects(){
   const tabs=[['active','진행 중'],['done','완성'],['archived','보관']];
   const list=db.projects.filter(p=>p.status===ui.tab).sort((a,b)=>b.updated-a.updated);
   return `<div class="page">
-  <header class="pagehead"><div><div class="eyebrow">내 프로젝트와 참여한 프로젝트</div><h1>프로젝트</h1></div><button class="btn primary" data-act="new-project">새 프로젝트</button></header>
+  <header class="pagehead"><div><div class="eyebrow">내 프로젝트와 참여한 프로젝트</div><h1>프로젝트</h1></div><div class="chips"><button class="btn" data-act="demo-open">예시 보기</button><button class="btn primary" data-act="new-project">새 프로젝트</button></div></header>
   <div class="tabs" role="tablist">${tabs.map(([k,l])=>`<button class="tab" role="tab" aria-selected="${ui.tab===k}" data-act="tab" data-tab="${k}">${l}<span class="mono">${db.projects.filter(p=>p.status===k).length}</span></button>`).join('')}</div>
   <div class="plist">${list.map(prow).join('')||`<div class="panel empty"><p class="muted" style="margin:0">${ui.tab==='active'?'진행 중인 프로젝트가 없어요.':ui.tab==='done'?'완성한 프로젝트가 아직 없어요.':'보관한 프로젝트가 없어요.'}</p></div>`}</div>
   <div class="trashlink"><button class="linkbtn" data-act="go" data-view="trash">휴지통 ${db.trash.length}</button><span>삭제한 프로젝트는 30일 동안 복구할 수 있어요.</span></div>
@@ -611,18 +620,17 @@ function vMap(p){
     <button class="btn ghost sm" data-act="go" data-view="projects" aria-label="프로젝트 목록으로">← 목록</button>
     <input class="maptitle" id="map-title" value="${esc(p.title)}" aria-label="프로젝트 이름" ${own?'':'readonly title="프로젝트 이름은 소유자만 바꿀 수 있어요"'}>
     <span class="chip">${esc(p.type)}</span>${own?'':`<span class="chip st-ok">참여 · ${PERM[p.role]}</span>`}
-    ${r?'<span class="chip">보기 전용</span>':'<span id="savestate" class="savestate"></span>'}
+    ${p.demo?'<span class="chip st-warn">예시 · 저장되지 않아요</span>':r?'<span class="chip">보기 전용</span>':'<span id="savestate" class="savestate"></span>'}
     <div class="topacts">
       ${r?'':`<button class="btn ghost sm" data-act="undo" title="Ctrl+Z">되돌리기</button><button class="btn ghost sm" data-act="redo" title="Ctrl+Shift+Z">다시 실행</button>`}
       <button class="btn ghost sm" data-act="versions">버전</button>
-      <button class="btn ghost sm" data-act="members">참여자 ${p.members.length}</button>
-      ${own?'<button class="btn primary sm" data-act="complete">완성하기</button>':''}
+      ${p.demo?'<button class="btn primary sm" data-act="demo-copy">내 프로젝트로 복사</button>':`<button class="btn ghost sm" data-act="members">참여자 ${p.members.length}</button>${own?'<button class="btn primary sm" data-act="complete">완성하기</button>':''}`}
     </div>
   </div>
   <div class="mapbody">
     <div class="stage" id="stage">
       <div class="world" id="world"><svg class="wires" id="wires"></svg><div id="cards"></div></div>
-      <div class="hint" id="hint" hidden><div>${r?'<b>아직 카드가 없어요</b>편집 참여자가 카드를 추가하면 여기에 보여요.':'<b>여기서 시작해 보세요</b>아이디어를 한 줄 쓰거나, 이미지를 붙여넣거나, 참고 링크를 넣으면 알맞은 카드로 바뀌어요.<span class="small">빈 곳을 두 번 누르면 아이디어 카드가 생겨요.</span>'}</div></div>
+      <div class="hint" id="hint" hidden><div>${r?'<b>아직 카드가 없어요</b>편집 참여자가 카드를 추가하면 여기에 보여요.':'<b>여기서 시작해 보세요</b>아이디어를 한 줄 쓰거나, 이미지를 붙여넣거나, 참고 링크를 넣으면 알맞은 카드로 바뀌어요.<span class="small">빈 곳을 두 번 누르면 아이디어 카드가 생겨요.</span><button class="btn sm" data-act="hint-close" style="pointer-events:auto;justify-self:center;margin-top:6px">닫기</button>'}</div></div>
       <div class="linkbanner" id="linkbanner" hidden></div>
       <div class="zoomctl"><button data-act="zoom" data-f="0.8" aria-label="축소">−</button><span id="zoomv">100%</span><button data-act="zoom" data-f="1.25" aria-label="확대">+</button><button data-act="fit">맞춤</button></div>
       <div class="toolbar" role="toolbar" aria-label="카드 추가">
@@ -665,7 +673,7 @@ function cardHTML(c){
   <div class="cardhead"><span class="chip kchip">${kindLabel(c)}</span>${c.due?`<span class="due${over?' over':''}">${dDay(c.due)}</span>`:''}</div>
   ${mediaHTML(c,false)}<h3>${esc(c.title||'제목 없음')}</h3>${c.body?`<p>${esc(c.body)}</p>`:''}${c.who?`<div class="who">담당 ${esc(c.who)}</div>`:''}</article>`;
 }
-function renderCards(){const p=cur();$('#cards').innerHTML=p.cards.map(cardHTML).join('');$('#hint').hidden=p.cards.length>0;drawWires();const sb2=document.querySelector('[data-act="shelf"] .mono');if(sb2)sb2.textContent=p.shelf.length}
+function renderCards(){const p=cur();$('#cards').innerHTML=p.cards.map(cardHTML).join('');$('#hint').hidden=p.cards.length>0||hintClosed.has(p.id);drawWires();const sb2=document.querySelector('[data-act="shelf"] .mono');if(sb2)sb2.textContent=p.shelf.length}
 function updateCardEl(c){const el=document.querySelector(`.card[data-id="${c.id}"]`);if(!el)return;el.outerHTML=cardHTML(c);drawWires()}
 function drawWires(){
   const p=cur(),svg=$('#wires');if(!svg||!p)return;
@@ -837,6 +845,44 @@ function mountMap(){
   st.addEventListener('drop',e=>{e.preventDefault();st.classList.remove('dropping');const fs=[...e.dataTransfer.files];if(fs.length)addFiles(fs,toWorld(e.clientX,e.clientY))});
   $('#filein').addEventListener('change',e=>{const fs=[...e.target.files];e.target.value='';if(fs.length)addFiles(fs)});
   const ti=$('#map-title');ti.addEventListener('input',()=>{if(ti.readOnly)return;p.title=ti.value;changed()});
+}
+
+
+/* ---------- 예시 프로젝트 (저장되지 않음) ---------- */
+function genFrame(h,i,label){
+  const c=document.createElement('canvas');c.width=192;c.height=108;const x=c.getContext('2d');
+  const g=x.createLinearGradient(0,0,0,108);g.addColorStop(0,`hsl(${h},35%,${12+i*3}%)`);g.addColorStop(1,`hsl(${h+30},45%,${24+i*4}%)`);
+  x.fillStyle=g;x.fillRect(0,0,192,108);
+  for(let k=0;k<5;k++){const cx=20+((k*41+i*23)%170),cy=20+((k*17+i*11)%50);const rg=x.createRadialGradient(cx,cy,0,cx,cy,18+k*2);rg.addColorStop(0,`hsla(${40+k*12},90%,70%,.85)`);rg.addColorStop(1,'hsla(40,90%,60%,0)');x.fillStyle=rg;x.fillRect(0,0,192,108)}
+  x.fillStyle='rgba(0,0,0,.35)';x.fillRect(0,78,192,30);x.fillStyle=`hsl(${h},20%,8%)`;x.fillRect(60+i*6,50,14,40);x.fillRect(120-i*5,58,10,32);
+  x.fillStyle='rgba(255,255,255,.85)';x.font='10px monospace';x.fillText(label,6,100);
+  try{return c.toDataURL('image/jpeg',.75)}catch(e){return ''}
+}
+const genFrames=(h,dur)=>[.1,.3,.5,.7,.9].map((p,i)=>({t:dur*p,img:genFrame(h,i,tc(dur*p))}));
+function makeDemo(){
+  const t=now();
+  const cards=[
+    {id:'c1',kind:'idea',x:40,y:40,title:'기획 의도',body:'관광지 말고 동네 사람만 아는 골목 3곳. 밤 9시 이후 분위기 위주로, 내레이션은 짧게.',created:t-9*DAY,public:true},
+    {id:'c2',kind:'intro',x:320,y:40,title:'도입부 15초',body:'자판기 불빛 클로즈업 → 내레이션 "여기서부터는 지도에 없어요"',created:t-8*DAY,public:true},
+    {id:'c3',kind:'ref',media:'youtube',x:40,y:250,title:'참고: 야간 골목 산책 영상 톤',url:'https://www.youtube.com/results?search_query=night+alley+walk',host:'YouTube',body:'카메라 높이와 걷는 속도 참고',created:t-8*DAY,public:false},
+    {id:'c4',kind:'ref',media:'link',x:320,y:250,title:'골목 위치 메모',url:'https://www.google.com/maps',host:'google.com',body:'역 북쪽 출구 기준 도보 5분',created:t-7*DAY,public:false},
+    {id:'c9',kind:'ref',media:'video',x:40,y:430,title:'촬영 테스트 컷',fileName:'test_cut.mp4',procState:'done',frames:genFrames(205,94),duration:94,orient:'h',body:'영상을 올리면 이렇게 대표 장면 5장만 남아요',created:t-5*DAY,public:true},
+    {id:'c5',kind:'scene',x:620,y:40,title:'장면 1 · 자판기 골목',body:'핸드헬드, 24fps. 자판기 불빛을 첫 컷으로.',created:t-6*DAY,public:true},
+    {id:'c6',kind:'scene',x:620,y:220,title:'장면 2 · 가게 앞',body:'간판 불 켜지는 순간 기다렸다가 촬영',created:t-6*DAY,public:true},
+    {id:'c7',kind:'scene',x:620,y:390,title:'장면 3 · 마지막 전철',body:'플랫폼 안내 방송 소리로 마무리',created:t-5*DAY,public:true},
+    {id:'c8',kind:'feedback',x:900,y:220,title:'장면 2 길이 줄이기',body:'40초 → 25초. 간판 켜지기 전 대기 구간 덜어내기',who:'',due:t+DAY,created:t-1*DAY,public:false}];
+  return {id:'demo',demo:true,ownerId:me?.id,role:'owner',owner:'',title:'예시 · 골목 브이로그',type:'YouTube',status:'active',visibility:'private',inHome:false,due:t+3*DAY,
+    goal:'관광지가 아닌 동네 골목 세 곳을 밤 분위기로 담기',result:null,publicCards:[],metrics:null,cards,
+    links:[['c1','c2'],['c2','c5'],['c3','c5'],['c4','c6'],['c8','c6'],['c9','c7']],shelf:[],versions:[],roles:{},
+    members:[{userId:me?.id,name:'',handle:'',perm:'owner'}],created:t,updated:t,completed:null,deletedAt:null};
+}
+async function copyDemo(){
+  if(ownActive()>=3)return toast('진행 중 3개를 넘어요. 하나를 정리한 뒤 다시 시도하세요.');
+  const d=JSON.parse(JSON.stringify({cards:demo.cards,links:demo.links}));
+  const {data,error}=await sb.from('projects').insert({title:'골목 브이로그 (예시에서 복사)',type:demo.type,goal:demo.goal,data:{cards:d.cards,links:d.links,shelf:[],versions:[],roles:{}}}).select().single();
+  if(error){toast('복사하지 못했어요. 다시 시도해 주세요.');return}
+  const p=fromRow(data,[],{[me.id]:{name:db.profile.name,handle:db.profile.handle}});
+  db.projects.unshift(p);logAct('예시 프로젝트를 내 프로젝트로 복사했어요',p.id);ui.sel=null;go('map',p.id);toast('내 프로젝트로 복사했어요');
 }
 
 /* ---------- 모달들 ---------- */
@@ -1110,6 +1156,9 @@ document.addEventListener('click',e=>{
     case 'to-app':toApp();break;
     case 'pub-open':history.pushState(null,'',projUrl(id));showPublicProject(id);break;
     case 'new-project':openNewProject();break;
+    case 'demo-open':demo=demo||makeDemo();ui.sel=null;go('map','demo');break;
+    case 'demo-copy':copyDemo();break;
+    case 'hint-close':hintClosed.add(ui.pid);$('#hint').hidden=true;break;
     case 'open-project':openProject(id);break;
     case 'tab':ui.tab=t.dataset.tab;render();break;
     case 'archive':{const q=proj(id);q.status='archived';markDirty(q);syncPublicPage(q);render();toast('보관했어요');break}
