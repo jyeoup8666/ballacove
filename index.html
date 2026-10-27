@@ -508,6 +508,25 @@ a.ref:hover{border-color:var(--accent)}
 .fontbtn.ff-pen{font-size:17px}.ff-pen.note-paper{font-size:19px}.ff-pen.pq{font-size:clamp(26px,3.8vw,36px)}
 .note-paper.ss-l{font-size:18px}
 .fontbtn{min-height:32px;padding:4px 10px}
+
+/* 글꼴 고르기 */
+.ffv .stx,.ffv h3,.ffv p,.ffv.pq,.ffv.note-paper{font-family:var(--ff),var(--f-body)}
+.fontpick{gap:8px;max-width:100%;justify-content:space-between;min-width:140px}
+.fontpick span{color:var(--muted);font-family:var(--f-body)}
+.toolopts .fontpick{min-width:120px}
+.fp-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.fp-tabs{margin-top:-4px}
+.fp-list{display:grid;gap:2px;max-height:min(52vh,460px);overflow-y:auto;margin:0 -6px;padding:0 6px}
+.fp-row{display:grid;grid-template-columns:minmax(0,180px) minmax(0,1fr);gap:4px 14px;align-items:baseline;text-align:left;border:1px solid transparent;background:none;border-radius:8px;padding:10px 12px;cursor:pointer;color:var(--ink)}
+.fp-row:hover{background:var(--sunk)}
+.fp-row[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft)}
+.fp-name{font-size:15px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fp-sample{font-size:18px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fp-note{grid-column:1/-1;font-size:12px;color:var(--muted)}
+.fp-empty{padding:20px 6px;display:grid;gap:10px;justify-items:start;color:var(--muted)}
+.fp-empty p{margin:0}
+.fp-up{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 6px 4px;border-top:1px solid var(--line);margin-top:6px}
+@media (max-width:760px){.fp-row{grid-template-columns:minmax(0,1fr)}.fp-sample{font-size:16px}}
 </style>
 </head>
 <body>
@@ -556,7 +575,7 @@ const LOGO='<svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 18a12 12 0 0
 
 /* ---------- 상태 ---------- */
 let me=null,started=false,publicMode=false;
-const emptyDb=()=>({profile:{name:'',handle:'',intro:'',fields:[],plan:'free',role:'user'},projects:[],trash:[],notifications:[],activity:[]});
+const emptyDb=()=>({profile:{name:'',handle:'',intro:'',fields:[],plan:'free',role:'user',fonts:[]},projects:[],trash:[],notifications:[],activity:[]});
 let db=emptyDb();
 const ui={view:'loading',pid:null,tab:'active',sel:null,linkFrom:null,pub:null,authMode:'login',err:''};
 const hist={};
@@ -584,13 +603,13 @@ function fromRow(r,mems,profs){
   return normProject({id:r.id,ownerId:r.owner_id,role:perm,owner:profs[r.owner_id]?.name||'',
     title:r.title,type:r.type,status:r.status,visibility:r.visibility,inHome:r.in_home,due:ts(r.due),goal:r.goal||'',
     result:r.result,publicCards:r.public_cards||[],metrics:r.metrics,
-    cards:d.cards||[],links:d.links||[],shelf:d.shelf||[],versions:d.versions||[],roles:d.roles||{},strokes:d.strokes||[],sections:d.sections||[],
+    cards:d.cards||[],links:d.links||[],shelf:d.shelf||[],versions:d.versions||[],roles:d.roles||{},strokes:d.strokes||[],sections:d.sections||[],fonts:(d.fonts||[]).map(f=>(registerFont(f),f)),
     members:[pm(r.owner_id,'owner'),...mems.filter(m=>m.project_id===r.id).map(m=>pm(m.user_id,m.perm))],
     created:ts(r.created_at),updated:ts(r.updated_at),completed:ts(r.completed_at),deletedAt:ts(r.deleted_at)});
 }
 function toRow(p){return {title:p.title,type:p.type,status:p.status,visibility:p.visibility,in_home:!!p.inHome,due:iso(p.due),goal:p.goal||'',
   result:p.result||null,public_cards:p.publicCards||[],metrics:p.metrics||null,
-  data:{cards:p.cards,links:p.links,shelf:p.shelf,versions:p.versions,roles:p.roles||{},strokes:p.strokes||[],sections:p.sections||[]},
+  data:{cards:p.cards,links:p.links,shelf:p.shelf,versions:p.versions,roles:p.roles||{},strokes:p.strokes||[],sections:p.sections||[],fonts:p.fonts||[]},
   updated_at:iso(p.updated||now()),completed_at:iso(p.completed),deleted_at:iso(p.deletedAt)}}
 
 async function loadAll(){
@@ -611,7 +630,8 @@ async function loadAll(){
   const uids=[...new Set([...(rows||[]).map(r=>r.owner_id),...mems.map(m=>m.user_id)])];
   const profs={};if(uids.length){const {data}=await sb.from('profiles').select('id,name,handle').in('id',uids);(data||[]).forEach(p=>profs[p.id]=p)}
   db=emptyDb();
-  if(prof)db.profile={name:prof.name||'',handle:prof.handle||'',intro:prof.intro||'',fields:prof.fields||[],plan:prof.plan||'free',role:prof.role||'user'};
+  if(prof)db.profile={name:prof.name||'',handle:prof.handle||'',intro:prof.intro||'',fields:prof.fields||[],plan:prof.plan||'free',role:prof.role||'user',fonts:prof.fonts||[]};
+  (db.profile.fonts||[]).forEach(registerFont);
   const cutoff=now()-30*DAY;
   for(const r of rows||[]){const p=fromRow(r,mems,profs);
     if(p.deletedAt){if(p.role!=='owner')continue;if(p.deletedAt<cutoff){purgeMedia(p.id).then(()=>sb.from('projects').delete().eq('id',p.id));continue}db.trash.push(p)}else db.projects.push(p)}
@@ -687,7 +707,7 @@ function pageLayout(p,ids){
   const pick=new Set(ids||p.publicCards||[]),pub=p.cards.filter(c=>pick.has(c.id));
   const secs=(p.sections||[]).filter(s=>pub.some(c=>{const[w,h]=approxSize(c),cx=c.x+w/2,cy=c.y+h/2;return cx>=s.x&&cx<=s.x+s.w&&cy>=s.y&&cy<=s.y+s.h})).map(s=>({x:s.x,y:s.y,w:s.w,h:s.h,title:s.title||''}));
   const links=(p.links||[]).map(l=>Array.isArray(l)?{a:l[0],b:l[1],type:'line'}:l).filter(l=>pick.has(l.a)&&pick.has(l.b)).map(l=>({a:l.a,b:l.b,type:l.type||'line'}));
-  return {sections:secs,links};
+  return {sections:secs,links,fonts:projectFontDefs(p,pub)};
 }
 function pageFromProject(p,o={}){
   const ids=o.ids||p.publicCards||[];
@@ -703,8 +723,8 @@ function chapterOf(c){
 }
 const readOrder=(a,b)=>(Math.round((a.y||0)/160)-Math.round((b.y||0)/160))||((a.x||0)-(b.x||0));
 function chapPlan(cs){
-  const quotes=cs.filter(c=>c.kind==='text'&&c.body).map(c=>`<p class="pq${ff(c)}">${esc(c.body)}</p>`).join('');
-  const cards=cs.filter(c=>c.kind!=='text').map(c=>`<div class="plan-card${ff(c)}">${c.img?`<img class="pc-img" src="${esc(c.img)}" alt="" loading="lazy">`:''}<span class="chip kchip k-${c.kind}">${kindLabel(c)}</span><h3>${esc(c.title||'')}</h3>${c.body?`<p>${esc(c.body)}</p>`:''}</div>`).join('');
+  const quotes=cs.filter(c=>c.kind==='text'&&c.body).map(c=>`<p class="pq${ff(c)}" style="${ffStyle(c)}">${esc(c.body)}</p>`).join('');
+  const cards=cs.filter(c=>c.kind!=='text').map(c=>`<div class="plan-card${ff(c)}" style="${ffStyle(c)}">${c.img?`<img class="pc-img" src="${esc(c.img)}" alt="" loading="lazy">`:''}<span class="chip kchip k-${c.kind}">${kindLabel(c)}</span><h3>${esc(c.title||'')}</h3>${c.body?`<p>${esc(c.body)}</p>`:''}</div>`).join('');
   return quotes+(cards?`<div class="plan-grid">${cards}</div>`:'');
 }
 function chapRef(cs){
@@ -717,7 +737,7 @@ function chapRef(cs){
 }
 function chapScene(cs){
   const scenes=cs.filter(c=>c.kind==='scene');
-  const board=scenes.length?`<ol class="board">${scenes.map((c,i)=>`<li class="${ff(c).trim()}"><span class="board-no mono">S${i+1}</span><div>${c.img?`<img class="pc-img" src="${esc(c.img)}" alt="" loading="lazy">`:''}<h3>${esc(c.title||'')}</h3>${c.body?`<p>${esc(c.body)}</p>`:''}</div></li>`).join('')}</ol>`:'';
+  const board=scenes.length?`<ol class="board">${scenes.map((c,i)=>`<li class="${ff(c).trim()}" style="${ffStyle(c)}"><span class="board-no mono">S${i+1}</span><div>${c.img?`<img class="pc-img" src="${esc(c.img)}" alt="" loading="lazy">`:''}<h3>${esc(c.title||'')}</h3>${c.body?`<p>${esc(c.body)}</p>`:''}</div></li>`).join('')}</ol>`:'';
   const groups=new Map();
   cs.filter(c=>c.media==='frame').sort((a,b)=>(a.t||0)-(b.t||0)).forEach(c=>{const k=c.sec||c.file||'촬영본';if(!groups.has(k))groups.set(k,[]);groups.get(k).push(c)});
   const legacy=cs.filter(c=>c.media==='video'&&c.frames&&c.frames.length).map(c=>[c.title||c.file||'촬영본',c.frames.map(f=>({img:f.img,t:f.t,orient:c.orient}))]);
@@ -725,7 +745,7 @@ function chapScene(cs){
   return board+films;
 }
 function chapSound(cs){return `<div class="sound-list">${cs.map(c=>`<div class="sound"><b>${esc(c.title||'')}</b>${c.body?`<span>${esc(c.body)}</span>`:''}${c.src?`<audio controls preload="none" src="${esc(c.src)}"></audio>`:''}</div>`).join('')}</div>`}
-function chapNote(cs){return `<div class="note-grid">${cs.map(c=>c.kind==='sticky'?`<div class="note-paper st-${c.color||'yellow'} ss-${c.size||'m'}${ff(c)}">${esc(c.body||'')}</div>`:`<div class="plan-card${ff(c)}">${c.img?`<img class="pc-img" src="${esc(c.img)}" alt="" loading="lazy">`:''}<span class="chip kchip k-${c.kind}">${kindLabel(c)}</span><h3>${esc(c.title||'')}</h3>${c.body?`<p>${esc(c.body)}</p>`:''}</div>`).join('')}</div>`}
+function chapNote(cs){return `<div class="note-grid">${cs.map(c=>c.kind==='sticky'?`<div class="note-paper st-${c.color||'yellow'} ss-${c.size||'m'}${ff(c)}" style="${ffStyle(c)}">${esc(c.body||'')}</div>`:`<div class="plan-card${ff(c)}" style="${ffStyle(c)}">${c.img?`<img class="pc-img" src="${esc(c.img)}" alt="" loading="lazy">`:''}<span class="chip kchip k-${c.kind}">${kindLabel(c)}</span><h3>${esc(c.title||'')}</h3>${c.body?`<p>${esc(c.body)}</p>`:''}</div>`).join('')}</div>`}
 function layoutMap(pg){
   const cs=pg.cards||[],L=pg.layout||{sections:[],links:[]};if(cs.length<3)return '';
   const W=960,Hm=360;let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
@@ -745,6 +765,7 @@ function resultHTML(pg){
   return `<section class="pub-sec"><a class="ref ref-row res-row" href="${esc(r.url)}" target="_blank" rel="noopener"><span class="ref-host">${esc(k?.host||'결과물')}</span><b>결과물 보기</b><small>${esc(r.url)}</small></a></section>`;
 }
 function pubHTML(pg){
+  (pg.layout?.fonts||[]).forEach(registerFont);
   const r=pg.result||{},cs=(pg.cards||[]).slice().sort(readOrder);
   const owner=(pg.members||[]).find(m=>m.owner)||{};
   const by=[esc(owner.name||''),owner.handle?'@'+esc(owner.handle):''].filter(Boolean).join(' · ');
@@ -919,8 +940,126 @@ const PEN_C=[['ink','검정'],['red','빨강'],['blue','파랑'],['green','초�
 const ST_C=[['yellow','노랑'],['pink','분홍'],['mint','민트'],['blue','하늘'],['lilac','보라']];
 const TX_S=[['s','작게'],['m','보통'],['l','크게'],['xl','제목']];
 const ST_S=[['s','작게'],['m','보통'],['l','크게']];
+/* ---------- 글꼴 ---------- */
 const FONTS=[['','기본'],['plex','본문체'],['gothic','고딕 제목'],['myeongjo','명조'],['pen','손글씨'],['round','둥근']];
-const ff=c=>c.font?' ff-'+c.font:'';
+const BUILTIN=new Set(FONTS.map(f=>f[0]).filter(Boolean));
+const WEB_FONTS=['Noto Sans KR','Noto Serif KR','Nanum Gothic','Nanum Gothic Coding','Nanum Brush Script','Gowun Dodum','Gowun Batang','Hahmlet','Black Han Sans','Do Hyeon','Dongle','Gaegu','Hi Melody','Poor Story','Gamja Flower','Cute Font','Single Day','Song Myung','Stylish','Yeon Sung','Gugi','Dokdo','East Sea Dokdo','Kirang Haerang','Black And White Picture','Orbit','Diphylleia','Gasoek One','Bagel Fat One','Moirai One','Grandiflora One'];
+const FONT_EXT={ttf:'font/ttf',otf:'font/otf',woff:'font/woff',woff2:'font/woff2'};
+const fontReg=new Map();
+const gLoaded=new Set();
+const cleanName=n=>String(n||'').replace(/["'\\;<>{}]/g,'').slice(0,80);
+function ensureGoogleFont(name){
+  name=cleanName(name);if(!name||gLoaded.has(name))return;gLoaded.add(name);
+  const l=document.createElement('link');l.rel='stylesheet';l.href=`https://fonts.googleapis.com/css2?family=${encodeURIComponent(name).replace(/%20/g,'+')}&display=swap`;document.head.appendChild(l);
+}
+function registerFont(def){
+  if(!def||!def.id||!def.url||fontReg.has(def.id))return;fontReg.set(def.id,def);
+  try{const f=new FontFace('BCU_'+def.id,`url("${def.url}")`);f.load().then(x=>document.fonts.add(x)).catch(()=>{})}catch(e){}
+}
+function familyCSS(key){
+  if(!key||BUILTIN.has(key))return '';
+  const v=cleanName(key.slice(2));
+  if(key.startsWith('g:')){ensureGoogleFont(v);return `'${v}'`}
+  if(key.startsWith('l:'))return `'${v}'`;
+  if(key.startsWith('u:'))return `'BCU_${v}'`;
+  return '';
+}
+const ff=c=>!c.font?'':BUILTIN.has(c.font)?' ff-'+c.font:' ffv';
+const ffStyle=c=>{const f=c.font&&familyCSS(c.font);return f?`--ff:${f};`:''};
+function fontLabel(key){
+  if(!key)return '기본';
+  const b=FONTS.find(f=>f[0]===key);if(b)return b[1];
+  if(key.startsWith('u:'))return fontReg.get(key.slice(2))?.name||'추가한 글꼴';
+  return key.slice(2);
+}
+function fontPreviewStyle(key){
+  if(!key)return '';
+  if(BUILTIN.has(key))return `font-family:${{plex:'var(--f-body)',gothic:'var(--f-display)',myeongjo:"'Nanum Myeongjo',serif",pen:"'Nanum Pen Script',cursive",round:"'Jua',sans-serif"}[key]}`;
+  const f=familyCSS(key);return f?`font-family:${f},var(--f-body)`:'';
+}
+function fontButton(key,target){return `<button class="btn sm fontpick" data-act="font-open" data-t="${target}" style="${fontPreviewStyle(key)}">${esc(fontLabel(key))}<span aria-hidden="true">▾</span></button>`}
+function projectFontDefs(p,cards){
+  const ids=new Set((cards||p.cards||[]).map(c=>c.font).filter(k=>k&&k.startsWith('u:')).map(k=>k.slice(2)));
+  return (p.fonts||[]).filter(f=>ids.has(f.id));
+}
+function useFontIn(p,key){
+  if(!p||!key||!key.startsWith('u:'))return;const id=key.slice(2);p.fonts=p.fonts||[];
+  if(!p.fonts.some(f=>f.id===id)){const d=fontReg.get(id);if(d)p.fonts.push({id:d.id,name:d.name,url:d.url})}
+}
+
+/* 글꼴 고르기 창 */
+let fontPick=null,localFonts=null;
+function fontTargetKey(){
+  if(!fontPick)return '';
+  if(fontPick.target==='tool')return tool.font||'';
+  if(fontPick.target==='card')return card(ui.sel)?.font||'';
+  const fs=[...S.c].map(id=>card(id)?.font||'');return fs.every(f=>f===fs[0])?fs[0]:null;
+}
+function openFontPicker(target){fontPick={target,tab:fontPick?.tab||'rec'};renderFontPicker()}
+function fontRows(list,cur){
+  return list.map(([key,name,note])=>`<button class="fp-row" data-act="fp-set" data-v="${esc(key)}" data-name="${esc(name.toLowerCase())}" aria-pressed="${cur===key}"${key.startsWith('g:')?` data-g="${esc(key.slice(2))}"`:''}><span class="fp-name" style="${fontPreviewStyle(key.startsWith('g:')?'':key)}">${esc(name)}</span><span class="fp-sample" style="${key.startsWith('g:')?'':fontPreviewStyle(key)}">가나다 마바사 Abc 123</span>${note?`<span class="fp-note">${esc(note)}</span>`:''}</button>`).join('');
+}
+function renderFontPicker(){
+  if(!fontPick)return;const cur=fontTargetKey(),tab=fontPick.tab;
+  const tabs=[['rec','기본'],['web','웹 글꼴'],['local','내 컴퓨터'],['mine','추가한 글꼴']];
+  let list='',foot='';
+  if(tab==='rec')list=fontRows(FONTS.map(([k,l])=>[k,l]),cur);
+  if(tab==='web'){list=fontRows(WEB_FONTS.map(n=>['g:'+n,n]),cur);foot='Google Fonts의 무료 한국어 글꼴이에요. 공개 페이지와 다른 사람 화면에서도 똑같이 보여요.'}
+  if(tab==='local'){
+    if(localFonts===null)list=`<div class="fp-empty"><p>이 컴퓨터에 설치된 글꼴 목록을 불러와요. 브라우저가 권한을 물어보면 허용해 주세요.</p><button class="btn primary sm" data-act="fp-local">내 컴퓨터 글꼴 불러오기</button></div>`;
+    else if(typeof localFonts==='string')list=`<div class="fp-empty"><p>${esc(localFonts)}</p></div>`;
+    else list=fontRows(localFonts.map(n=>['l:'+n,n]),cur);
+    foot='내 컴퓨터 글꼴은 그 글꼴이 설치된 기기에서만 보여요. 공개 페이지나 다른 사람 화면에서는 기본 글꼴로 보여요. 모두에게 똑같이 보이게 하려면 ‘추가한 글꼴’에 파일을 올려 주세요.';
+  }
+  if(tab==='mine'){
+    const mine=db.profile.fonts||[];
+    list=(mine.length?fontRows(mine.map(f=>['u:'+f.id,f.name]),cur):'<div class="fp-empty"><p>아직 추가한 글꼴이 없어요.</p></div>')+`<div class="fp-up"><label class="btn sm" for="fontin">글꼴 파일 올리기</label><input type="file" id="fontin" accept=".ttf,.otf,.woff,.woff2" hidden><span class="small muted">ttf · otf · woff · woff2, 10MB까지</span></div>`;
+    foot='올린 글꼴은 공개 페이지에서도 그대로 보여요. 그만큼 파일이 공개 주소로 전달되니, 웹 사용(임베딩)이 허용된 글꼴만 올려 주세요.';
+  }
+  const tgt=fontPick.target==='sel'?`선택한 노드 ${S.c.size}개`:fontPick.target==='tool'?'새로 만들 포스트잇·텍스트':'선택한 노드';
+  modal(`<div class="fp-head"><h2>글꼴</h2><span class="small muted">${tgt}에 적용</span></div>
+  <input id="fp-q" type="search" placeholder="글꼴 이름으로 찾기" autocomplete="off" aria-label="글꼴 찾기">
+  <div class="tabs fp-tabs" role="tablist">${tabs.map(([k,l])=>`<button class="tab" role="tab" aria-selected="${tab===k}" data-act="fp-tab" data-tab="${k}">${l}</button>`).join('')}</div>
+  <div class="fp-list" id="fp-list">${list}</div>
+  ${foot?`<p class="small muted" style="margin:0">${foot}</p>`:''}
+  <div class="mfoot"><button class="btn ghost" data-act="close">닫기</button></div>`,m=>{
+    const q=m.querySelector('#fp-q');
+    q.addEventListener('input',()=>{const v=q.value.trim().toLowerCase();m.querySelectorAll('.fp-row').forEach(r=>{r.hidden=!!v&&!r.dataset.name.includes(v)})});
+    const io=new IntersectionObserver(es=>es.forEach(en=>{if(!en.isIntersecting)return;const r=en.target,n=r.dataset.g;ensureGoogleFont(n);const st=`font-family:'${cleanName(n)}',var(--f-body)`;r.querySelector('.fp-name').setAttribute('style',st);r.querySelector('.fp-sample').setAttribute('style',st);io.unobserve(r)}),{root:m.querySelector('#fp-list')});
+    m.querySelectorAll('.fp-row[data-g]').forEach(r=>io.observe(r));
+    m.querySelector('#fontin')?.addEventListener('change',e=>{const f=e.target.files[0];e.target.value='';if(f)uploadFont(f)});
+    const on=m.querySelector('.fp-row[aria-pressed="true"]');if(on)on.scrollIntoView({block:'nearest'});
+  },true);
+}
+async function loadLocalFonts(){
+  if(!('queryLocalFonts' in window)){localFonts='이 브라우저는 내 컴퓨터 글꼴 목록을 지원하지 않아요. 컴퓨터의 Chrome이나 Edge에서 열어 주세요.';renderFontPicker();return}
+  try{const data=await window.queryLocalFonts();const s=new Set();data.forEach(d=>s.add(d.family));localFonts=[...s].sort((a,b)=>a.localeCompare(b,'ko'));if(!localFonts.length)localFonts='불러온 글꼴이 없어요.'}
+  catch(e){localFonts='글꼴 목록을 볼 권한이 없어요. 주소창 왼쪽의 사이트 설정에서 ‘글꼴’ 권한을 허용한 뒤 다시 시도해 주세요.'}
+  renderFontPicker();
+}
+async function uploadFont(f){
+  const ext=(f.name.split('.').pop()||'').toLowerCase();
+  if(!FONT_EXT[ext])return toast('ttf, otf, woff, woff2 파일만 올릴 수 있어요');
+  if(f.size>10*1024*1024)return toast('글꼴 파일은 10MB까지 올릴 수 있어요');
+  try{const t=new FontFace('BCTEST'+uid(),await f.arrayBuffer());await t.load()}catch(e){return toast('글꼴 파일을 읽을 수 없어요. 다른 파일로 시도해 주세요.')}
+  toast('글꼴을 올리는 중이에요');
+  const id=uid()+uid(),path=`u_${me.id}/fonts/${id}.${ext}`;
+  const {error}=await sb.storage.from(STORE).upload(path,f,{contentType:FONT_EXT[ext],cacheControl:'31536000',upsert:false});
+  if(error){console.error(error);return toast('글꼴을 올리지 못했어요')}
+  const def={id,name:cleanName(baseName(f.name))||'내 글꼴',url:sb.storage.from(STORE).getPublicUrl(path).data.publicUrl};
+  const next=[...(db.profile.fonts||[]),def];
+  const {error:e2}=await sb.from('profiles').update({fonts:next}).eq('id',me.id);
+  if(e2){console.error(e2);return toast('글꼴 목록을 저장하지 못했어요')}
+  db.profile.fonts=next;registerFont(def);toast(`‘${def.name}’ 글꼴을 추가했어요`);
+  if(fontPick){fontPick.tab='mine';renderFontPicker()}
+}
+function applyFont(key){
+  const p=cur();
+  if(fontPick.target==='tool'){tool.font=key;paintTool();return}
+  const ids=fontPick.target==='card'?[ui.sel]:[...S.c];
+  const cs=ids.map(id=>card(id)).filter(Boolean).filter(c=>(c.font||'')!==key);if(!cs.length)return;
+  checkpoint();cs.forEach(c=>{if(key)c.font=key;else delete c.font;updateCardEl(c)});useFontIn(p,key);renderDetail();changed();
+}
 const canHoldImage=c=>!!c&&!['sticky','text'].includes(c.kind)&&!(c.kind==='ref'&&c.media);
 const TI={
   select:'<path d="M5 3.5l13 6.2-5.6 1.8-1.9 5.8z"/><path d="M12.5 11.6l5 5"/>',
@@ -1027,7 +1166,7 @@ function mediaHTML(c,big){
 }
 function cardHTML(c){
   const cls=`${S.c.has(c.id)?' sel':''}${conn.from===c.id?' linksrc':''}`;
-  const pos=`left:${c.x}px;top:${c.y}px`;
+  const pos=`left:${c.x}px;top:${c.y}px;${ffStyle(c)}`;
   if(c.kind==='sticky')return `<article class="card sticky st-${c.color||'yellow'} ss-${c.size||'m'}${ff(c)}${cls}" data-id="${c.id}" style="${pos}"><div class="stx">${c.body?esc(c.body):'<span class="ph">두 번 눌러 쓰기</span>'}</div></article>`;
   if(c.kind==='text')return `<article class="card textbox ts-${c.size||'m'}${ff(c)}${cls}" data-id="${c.id}" style="${pos}"><div class="stx">${c.body?esc(c.body):'<span class="ph">텍스트</span>'}</div></article>`;
   const over=c.due&&sod(c.due)<sod(now());
@@ -1162,7 +1301,7 @@ function paintSelbar(){
   const el=$('#selbar');if(!el)return;const p=cur();const n=S.c.size+S.k.size+S.x.size;
   if(!p||ro(p)||!n||ui.sel){el.hidden=true;return}
   const parts=[];if(S.c.size)parts.push(`카드 ${S.c.size}`);if(S.x.size)parts.push(`섹션 ${S.x.size}`);if(S.k.size)parts.push(`펜 ${S.k.size}`);
-  el.innerHTML=`<span>${parts.join(' · ')} 선택</span>${S.x.size===1&&n===1?'<button class="optbtn" data-act="sec-rename">이름 바꾸기</button>':''}<button class="optbtn" data-act="dup">복제</button><button class="optbtn danger-t" data-act="sel-del">삭제</button>`;
+  el.innerHTML=`<span>${parts.join(' · ')} 선택</span>${S.x.size===1&&n===1?'<button class="optbtn" data-act="sec-rename">이름 바꾸기</button>':''}${S.c.size>1?'<button class="optbtn" data-act="font-open" data-t="sel">글꼴</button>':''}<button class="optbtn" data-act="dup">복제</button><button class="optbtn danger-t" data-act="sel-del">삭제</button>`;
   el.hidden=false;
 }
 function selectAll(){const p=cur();selClear();p.cards.forEach(c=>S.c.add(c.id));p.strokes.forEach(k=>S.k.add(k.id));p.sections.forEach(s=>S.x.add(s.id));selSync()}
@@ -1201,7 +1340,7 @@ function paintTool(){
   if(ui.menu==='card')h=[['idea','아이디어'],['intro','도입부'],['scene','장면'],['feedback','피드백']].map(([k,l])=>`<button class="optbtn" data-act="add" data-kind="${k}"><i class="dot k-${k}"></i>${l}</button>`).join('');
   else if(tool.cur==='connect')h=`<button class="optbtn" data-act="ltype" data-v="line" aria-pressed="${tool.linkType==='line'}">${ico('line')}선</button><button class="optbtn" data-act="ltype" data-v="arrow" aria-pressed="${tool.linkType==='arrow'}">${ico('arrow')}화살표</button>`;
   else if(tool.cur==='pen')h=PEN_W.map(w=>`<button class="optbtn" data-act="penw" data-v="${w}" aria-pressed="${tool.penW===w}" aria-label="굵기 ${w}"><i class="wdot" style="width:${Math.max(4,w)}px;height:${Math.max(4,w)}px"></i></button>`).join('')+'<span class="optsep"></span>'+PEN_C.map(([k,l])=>`<button class="swatch pen-${k}" data-act="penc" data-v="${k}" aria-pressed="${tool.penC===k}" aria-label="${l}"></button>`).join('');
-  else if(tool.cur==='sticky'||tool.cur==='text'){const fonts=FONTS.map(([k,l])=>`<button class="optbtn fontbtn${k?' ff-'+k:''}" data-act="tfont" data-v="${k}" aria-pressed="${tool.font===k}">${l}</button>`).join('');
+  else if(tool.cur==='sticky'||tool.cur==='text'){const fonts=`<span class="small muted" style="padding-left:4px">글꼴</span>${fontButton(tool.font||'','tool')}`;
     h=(tool.cur==='sticky'?ST_C.map(([k,l])=>`<button class="swatch st-${k}" data-act="stc" data-v="${k}" aria-pressed="${tool.stC===k}" aria-label="${l}"></button>`).join('')+'<span class="optsep"></span>':'')+fonts}
   o.innerHTML=h;o.hidden=!h;
 }
@@ -1282,7 +1421,7 @@ function renderDetail(){
       :'';
     const sizes=c.kind==='sticky'?ST_S:TX_S;
     const sizeRow=`<div class="field"><span>글자 크기</span><div class="chips">${sizes.map(([k,l])=>`<button class="optbtn" data-act="d-size" data-v="${k}" aria-pressed="${(c.size||'m')===k}" ${dis}>${l}</button>`).join('')}</div></div>`;
-    d.innerHTML=`${head}${opts}${`<div class="field"><span>글꼴</span><div class="chips">${FONTS.map(([k,l])=>`<button class="optbtn fontbtn${k?' ff-'+k:''}" data-act="d-font" data-v="${k}" aria-pressed="${(c.font||'')===k}" ${dis}>${l}</button>`).join('')}</div></div>`}${sizeRow}${r?'':'<button class="btn sm" data-act="d-edit" style="justify-self:start">내용 쓰기</button><p class="small muted" style="margin:0">캔버스에서 두 번 누르거나, 선택된 상태에서 한 번 더 누르면 바로 쓸 수 있어요.</p>'}${linkedHTML}${acts}`;
+    d.innerHTML=`${head}${opts}${`<div class="field"><span>글꼴</span>${r?`<span>${esc(fontLabel(c.font||''))}</span>`:fontButton(c.font||'','card')}</div>`}${sizeRow}${r?'':'<button class="btn sm" data-act="d-edit" style="justify-self:start">내용 쓰기</button><p class="small muted" style="margin:0">캔버스에서 두 번 누르거나, 선택된 상태에서 한 번 더 누르면 바로 쓸 수 있어요.</p>'}${linkedHTML}${acts}`;
     return;
   }
   d.innerHTML=`${head}
@@ -1290,7 +1429,7 @@ function renderDetail(){
   <label class="field"><span>${c.kind==='ref'?'활용 메모':'내용'}</span><textarea id="d-body" rows="4" ${dis}>${esc(c.body||'')}</textarea></label>
   ${c.kind==='feedback'?`<div class="row2"><label class="field"><span>담당</span><input id="d-who" value="${esc(c.who||'')}" ${dis}></label><label class="field"><span>기한</span><input type="date" id="d-due" value="${c.due?isoDate(c.due):''}" ${dis}></label></div>`:''}
   ${canHoldImage(c)?`<div class="field"><span>이미지</span>${c.imgUp?'<div class="proc"><span class="spin"></span>이미지 올리는 중</div>':c.img?`<img class="dimg" src="${esc(c.img)}" alt="">`:''}${r?'':`<div class="chips"><button class="btn sm" data-act="d-img">${c.img?'이미지 바꾸기':'이미지 넣기'}</button>${c.img?'<button class="btn sm ghost" data-act="d-img-del">이미지 빼기</button>':''}</div><span class="small muted">이미지 파일을 이 노드 위에 끌어다 놓아도 돼요.</span>`}</div>`:''}
-  ${`<div class="field"><span>글꼴</span><div class="chips">${FONTS.map(([k,l])=>`<button class="optbtn fontbtn${k?' ff-'+k:''}" data-act="d-font" data-v="${k}" aria-pressed="${(c.font||'')===k}" ${dis}>${l}</button>`).join('')}</div></div>`}
+  ${`<div class="field"><span>글꼴</span>${r?`<span>${esc(fontLabel(c.font||''))}</span>`:fontButton(c.font||'','card')}</div>`}
   ${mediaHTML(c,true)}
   <dl class="meta"><dt>출처·원본</dt><dd>${source(c)}</dd><dt>생성 시점</dt><dd class="mono">${fmtDT(c.created)}</dd></dl>
   ${linkedHTML}
@@ -1990,6 +2129,10 @@ document.addEventListener('click',e=>{
     case 'd-img-del':{const c=card(ui.sel);if(c&&c.img){checkpoint();delete c.img;updateCardEl(c);renderDetail();changed()}break}
     case 'd-font':{const c=card(ui.sel);if(c&&(c.font||'')!==t.dataset.v){checkpoint();if(t.dataset.v)c.font=t.dataset.v;else delete c.font;updateCardEl(c);renderDetail();changed()}break}
     case 'tfont':tool.font=t.dataset.v;paintTool();break;
+    case 'font-open':openFontPicker(t.dataset.t);break;
+    case 'fp-tab':fontPick.tab=t.dataset.tab;renderFontPicker();break;
+    case 'fp-local':loadLocalFonts();break;
+    case 'fp-set':{const v=t.dataset.v;closeModal();applyFont(v);break}
     case 'dup':duplicateNow();break;
     case 'd-color':{const c=card(ui.sel);if(c&&(c.color||'yellow')!==t.dataset.v){checkpoint();c.color=t.dataset.v;tool.stC=c.color;updateCardEl(c);renderDetail();changed()}break}
     case 'd-size':{const c=card(ui.sel);if(c&&(c.size||'m')!==t.dataset.v){checkpoint();c.size=t.dataset.v;updateCardEl(c);renderDetail();changed()}break}
