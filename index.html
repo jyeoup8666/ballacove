@@ -150,6 +150,8 @@ button.chip{cursor:pointer}
 .card.sel{outline:2px solid var(--accent);outline-offset:1px}
 .card.linksrc{outline:2px dashed var(--accent);outline-offset:2px}
 .card.dragging{cursor:grabbing;box-shadow:0 14px 30px rgba(0,0,0,.18);z-index:3}
+.card.droptarget{outline:3px solid var(--accent);outline-offset:3px}
+.card.droptarget::after{content:'여기에 장면 넣기';position:absolute;left:50%;top:-14px;transform:translate(-50%,-100%);background:var(--accent);color:var(--accent-ink);font-size:12px;font-weight:600;padding:4px 10px;border-radius:999px;white-space:nowrap;pointer-events:none;z-index:4}
 .cardhead{display:flex;justify-content:space-between;align-items:center;gap:6px}
 .card h3{font-size:14px;font-weight:600;line-height:1.35;overflow-wrap:anywhere}
 .card p{margin:0;color:var(--muted);font-size:12.5px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
@@ -1431,6 +1433,7 @@ function renderDetail(){
   ${canHoldImage(c)?`<div class="field"><span>이미지</span>${c.imgUp?'<div class="proc"><span class="spin"></span>이미지 올리는 중</div>':c.img?`<img class="dimg" src="${esc(c.img)}" alt="">`:''}${r?'':`<div class="chips"><button class="btn sm" data-act="d-img">${c.img?'이미지 바꾸기':'이미지 넣기'}</button>${c.img?'<button class="btn sm ghost" data-act="d-img-del">이미지 빼기</button>':''}</div><span class="small muted">이미지 파일을 이 노드 위에 끌어다 놓아도 돼요.</span>`}</div>`:''}
   ${`<div class="field"><span>글꼴</span>${r?`<span>${esc(fontLabel(c.font||''))}</span>`:fontButton(c.font||'','card')}</div>`}
   ${mediaHTML(c,true)}
+  ${c.media==='frame'&&!r?'<p class="small muted" style="margin:0">이 장면을 도입부 같은 다른 노드 위에 끌어다 놓으면 그 노드의 이미지로 들어가요.</p>':''}
   <dl class="meta"><dt>출처·원본</dt><dd>${source(c)}</dd><dt>생성 시점</dt><dd class="mono">${fmtDT(c.created)}</dd></dl>
   ${linkedHTML}
   ${r?'':`<label class="check"><input type="checkbox" id="d-public" ${c.public?'checked':''}><span>완성 페이지에 공개해도 되는 자료<br><span class="small muted">끄면 공개 페이지를 만들 때 이 카드는 노출되지 않아요.</span></span></label>`}
@@ -1617,10 +1620,27 @@ function mountMap(){
     p.sections.forEach(s=>{if(contains(R,s))S.x.add(s.id)});
     paintSel();
   };
+  /* 끌기 위치는 화면 이동량이 아니라 월드 좌표 차이로 계산해요. 끄는 중에 확대·축소·스크롤해도 노드가 커서 아래에 그대로 붙어 있어요. */
+  const dragTo=(o,cx,cy)=>{
+    const w=toWorld(cx,cy),ddx=w.x-o.w0.x,ddy=w.y-o.w0.y;
+    if(o.type==='resize'){o.s.w=Math.max(160,Math.round(o.ow+ddx));o.s.h=Math.max(100,Math.round(o.oh+ddy));const el=document.querySelector(`.section[data-sid="${o.s.id}"]`);if(el){el.style.width=o.s.w+'px';el.style.height=o.s.h+'px'}return}
+    o.pos.c.forEach(([c,x,y])=>{c.x=Math.round(x+ddx);c.y=Math.round(y+ddy);const el=cardEl(c.id);if(el){el.style.left=c.x+'px';el.style.top=c.y+'px'}});
+    o.pos.x.forEach(([s,x,y])=>{s.x=Math.round(x+ddx);s.y=Math.round(y+ddy);const el=document.querySelector(`.section[data-sid="${s.id}"]`);if(el){el.style.left=s.x+'px';el.style.top=s.y+'px'}});
+    if(o.pos.k.length){o.pos.k.forEach(([k,pts])=>{k.pts=pts.map(([a,b])=>[+(a+ddx).toFixed(1),+(b+ddy).toFixed(1)])});drawInk()}
+    drawWires();if(o.frame)dropHover(o,cx,cy);
+  };
+  /* 장면 프레임을 다른 노드 위에 놓으면 그 노드의 이미지로 들어가요 */
+  const dropHover=(o,cx,cy)=>{
+    const ids=new Set(o.pos.c.map(([c])=>c.id));let tgt=null;
+    for(const el of document.elementsFromPoint(cx,cy)){const ce=el.closest&&el.closest('.card');if(ce&&!ids.has(ce.dataset.id)){const c=card(ce.dataset.id);if(canHoldImage(c))tgt=c;break}}
+    const id=tgt?tgt.id:null;if(id===o.drop)return;
+    if(o.drop)cardEl(o.drop)?.classList.remove('droptarget');
+    o.drop=id;if(id)cardEl(id)?.classList.add('droptarget');
+  };
   const abortOp=()=>{
     if(!op)return;
     if(op.type==='pen')liveEnd();
-    if(op.type==='move'){document.querySelectorAll('.card.dragging').forEach(el=>el.classList.remove('dragging'));if(op.moved){checkpoint(op.snap);changed()}}
+    if(op.type==='move'){document.querySelectorAll('.card.dragging,.card.droptarget').forEach(el=>el.classList.remove('dragging','droptarget'));if(op.moved){checkpoint(op.snap);changed()}}
     if((op.type==='resize'&&op.moved)||(op.type==='erase'&&op.hit)){checkpoint(op.snap);changed()}
     hideBox();op=null;
   };
@@ -1666,18 +1686,13 @@ function mountMap(){
     if(!op.moved){
       if(Math.hypot(dx,dy)<4&&op.type!=='pen'&&op.type!=='erase')return;
       op.moved=true;
-      if(op.type==='move')op.pos.c.forEach(([c])=>cardEl(c.id)?.classList.add('dragging'));
+      if(op.type==='move'){op.pos.c.forEach(([c])=>cardEl(c.id)?.classList.add('dragging'));const fr=op.pos.c.filter(([c])=>c.kind==='ref'&&c.media==='frame');if(fr.length===1&&op.pos.c.length===1&&!op.pos.x.length&&!op.pos.k.length)op.frame=fr[0][0]}
       if(op.type==='tap'){op.type='pan';st.classList.add('panning')}
     }
-    const w=toWorld(e.clientX,e.clientY);
+    const w=toWorld(e.clientX,e.clientY);op.lx=e.clientX;op.ly=e.clientY;
     switch(op.type){
       case 'pan':v.x=op.ox+dx;v.y=op.oy+dy;applyView();break;
-      case 'move':{const ddx=dx/v.z,ddy=dy/v.z;
-        op.pos.c.forEach(([c,x,y])=>{c.x=Math.round(x+ddx);c.y=Math.round(y+ddy);const el=cardEl(c.id);if(el){el.style.left=c.x+'px';el.style.top=c.y+'px'}});
-        op.pos.x.forEach(([s,x,y])=>{s.x=Math.round(x+ddx);s.y=Math.round(y+ddy);const el=document.querySelector(`.section[data-sid="${s.id}"]`);if(el){el.style.left=s.x+'px';el.style.top=s.y+'px'}});
-        if(op.pos.k.length){op.pos.k.forEach(([k,pts])=>{k.pts=pts.map(([a,b])=>[+(a+ddx).toFixed(1),+(b+ddy).toFixed(1)])});drawInk()}
-        drawWires();break}
-      case 'resize':{op.s.w=Math.max(160,Math.round(op.ow+dx/v.z));op.s.h=Math.max(100,Math.round(op.oh+dy/v.z));const el=document.querySelector(`.section[data-sid="${op.s.id}"]`);if(el){el.style.width=op.s.w+'px';el.style.height=op.s.h+'px'}break}
+      case 'move':case 'resize':dragTo(op,e.clientX,e.clientY);break;
       case 'marquee':showBox(op,e.clientX,e.clientY);marquee(op,e.clientX,e.clientY);break;
       case 'secdraw':showBox(op,e.clientX,e.clientY,'secdraw');break;
       case 'pen':{const l=op.pts[op.pts.length-1];if(Math.hypot(w.x-l[0],w.y-l[1])*v.z>=2){op.pts.push([+w.x.toFixed(1),+w.y.toFixed(1)]);liveUpdate(op)}break}
@@ -1692,7 +1707,14 @@ function mountMap(){
     switch(o.type){
       case 'move':
         o.pos.c.forEach(([c])=>cardEl(c.id)?.classList.remove('dragging'));
+        if(o.drop)cardEl(o.drop)?.classList.remove('droptarget');
         if(o.dup&&(!o.moved||cancel)){restoreSnap(o.snap);break}
+        if(o.moved&&!cancel&&o.drop&&o.frame){
+          const img=o.frame.img,title=o.frame.title||'장면',tid=o.drop;
+          restoreSnap(o.snap);checkpoint(o.snap);
+          const t=card(tid);if(!t||!img)break;t.img=img;delete t.imgUp;
+          renderCards();setSel(t.id);changed();
+          toast(`‘${title}’ 장면을 ‘${t.title||'노드'}’에 넣었어요 · Ctrl+Z로 되돌릴 수 있어요`);break}
         if(o.moved){checkpoint(o.snap);changed();if(o.dup)toast(`${o.pos.c.length+o.pos.k.length+o.pos.x.length}개를 복제했어요`)}
         else if(!cancel&&o.clickId&&!e.shiftKey){
           if(o.was&&(S.c.size>1||S.k.size||S.x.size)){selClear();S.c.add(o.clickId);selSync()}
@@ -1715,7 +1737,8 @@ function mountMap(){
   };
   st.addEventListener('pointerup',e=>end(e,false));st.addEventListener('pointercancel',e=>end(e,true));
   st.addEventListener('pointerleave',()=>{if(!ptrs.size&&conn.hover){conn.hover=null;drawWires()}});
-  st.addEventListener('wheel',e=>{e.preventDefault();const rc=st.getBoundingClientRect();if(e.ctrlKey||e.metaKey||Math.abs(e.deltaY)>Math.abs(e.deltaX)&&!e.shiftKey&&e.deltaMode===0&&Math.abs(e.deltaY)>=40){zoomAt(e.clientX-rc.left,e.clientY-rc.top,Math.exp(-e.deltaY*.0018))}else{const v=V();v.x-=e.deltaX;v.y-=e.deltaY;applyView()}},{passive:false});
+  st.addEventListener('wheel',e=>{e.preventDefault();const rc=st.getBoundingClientRect();if(e.ctrlKey||e.metaKey||Math.abs(e.deltaY)>Math.abs(e.deltaX)&&!e.shiftKey&&e.deltaMode===0&&Math.abs(e.deltaY)>=40){zoomAt(e.clientX-rc.left,e.clientY-rc.top,Math.exp(-e.deltaY*.0018))}else{const v=V();v.x-=e.deltaX;v.y-=e.deltaY;applyView()}
+    if(op&&op.moved&&(op.type==='move'||op.type==='resize'))dragTo(op,op.lx??e.clientX,op.ly??e.clientY);},{passive:false});
   if(r)return;
   st.addEventListener('dblclick',e=>{
     const tg=document.elementFromPoint(e.clientX,e.clientY)||e.target;
